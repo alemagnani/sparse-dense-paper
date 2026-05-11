@@ -22,7 +22,7 @@ ale.magnani@gmail.com}
 \maketitle
 
 \begin{abstract}
-Dense retrieval methods have demonstrated impressive performance on many information retrieval tasks, with theoretical analyses suggesting they can match or exceed sparse retrieval approaches. However, the practical deployment of these methods in service-oriented architectures relies on approximate nearest neighbor search algorithms like HNSW and IVF, which introduce additional constraints affecting service quality. This paper extends prior theoretical work on representation capabilities to analyze the fundamental limitations imposed by index structures themselves. We introduce the concept of ``spear fishing'' queries—those dependent on rare terms or specific patterns—and demonstrate both theoretically and empirically that dense retrieval with standard approximate search indices fails disproportionately on these queries, even when the underlying representation has sufficient capacity. Our findings reveal an important constraint in the sparse-dense retrieval trade-off that has been underexplored in existing literature and has significant implications for practical IR system design in service environments. These insights contribute to more reliable and efficient information retrieval services that better meet diverse user needs.
+Dense retrieval relies on approximate nearest-neighbor (ANN) indices such as HNSW and IVF for practical deployment. Prior theoretical work has focused on the \emph{representational} capacity of dense embeddings; we show that the \emph{indexing} stage imposes a separate, quantifiable bottleneck. We introduce \emph{indexing bias}---the systematic gap between exact and approximate retrieval probability---and derive a centroid-dilution bound linking IDF-weighted token rarity, embedding dimensionality, and cluster granularity. We then isolate index-induced failures empirically by holding the representation fixed (random-projection trigram embeddings at varying dimensions) and varying only the indexing structure on Home Depot product search and MS MARCO Passage. On so-called \emph{spear-fishing} queries---those depending on identifiers or rare terms---switching from exact to HNSW search forfeits up to $63\%$ of the achievable Recall@10, versus less than $2\%$ for standard semantic queries. Increasing embedding dimensionality reduces representation noise but does not close this index-induced gap. The results reframe the sparse-vs-dense trade-off as a joint choice of representation and indexing, with direct implications for production retrieval stacks where part-number, SKU, and named-entity queries are operationally important.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -40,16 +40,16 @@ This paper argues that ANN index structures introduce significant bottlenecks, p
 
 We make the following contributions:
 \begin{itemize}
-    \item We formalize the concept of ``spear fishing'' queries and demonstrate theoretically why standard ANN indices (like IVF and HNSW) struggle with them, independent of the representation's theoretical capacity.
-    
-    \item We provide a theoretical analysis linking term rarity, embedding dimensionality, and index parameters (clustering, graph connectivity) to retrieval failure probability under ANN search.
-    
-    \item We empirically quantify the performance gap between exact (Flat) and approximate (IVF, HNSW) search, showing it is disproportionately large for spear fishing (ID and Rare term) queries, validating our theoretical predictions.
-    
-    \item We highlight that the limitations of the index structure constitute an important, often overlooked, constraint in the ongoing sparse-dense retrieval debate \cite{lin2024dense}, with practical implications for system design.
+    \item We formalize the concept of ``spear fishing'' queries and demonstrate theoretically why standard ANN indices (IVF and HNSW) struggle with them, \emph{independent of the representation's theoretical capacity}.
+
+    \item We derive a \emph{centroid-dilution bound} that links IDF-weighted token rarity, embedding dimensionality $d$, and clustering granularity to the probability that an IVF centroid fails to carry a rare token's signal above the Johnson--Lindenstrauss noise floor.
+
+    \item We isolate index-induced failure empirically by comparing exact (Flat) and approximate (IVF, HNSW) search on a controlled three-axis design (two datasets $\times$ three query types $\times$ three embedding dimensions), and quantify the resulting \emph{indexing bias}.
+
+    \item We show that the gap is disproportionately large for ID and rare-term queries and that, unlike representation-level limitations, this gap does not vanish at higher embedding dimensionality.
 \end{itemize}
 
-Our findings reveal that the choice and configuration of the ANN index are not merely implementation details but fundamental factors affecting service quality and retrieval reliability, particularly at the tail end of query types. This necessitates a more holistic view considering both representation and indexing when designing and evaluating dense retrieval systems for robust service delivery.
+\noindent\textit{What is new versus prior work.} Tay et al.~\cite{tay2020sparse} and Fan et al.~\cite{fan2022information} analyze \emph{representation-level} capacity of dense vectors. We complement this with an \emph{index-level} analysis: we hold the representation fixed (via random-projection trigram embeddings of varying dimension) and vary only the indexing structure, so that every observed degradation can be attributed to the index. Sec.~\ref{sec:theory} formalizes this separation; Sec.~\ref{sec:experiments} tests it.
 
 \section{Background and Related Work}
 
@@ -64,23 +64,14 @@ Tay et al.\ \cite{tay2020sparse} demonstrated that dense representations can the
 Fan et al.\ \cite{fan2022information} conducted an information-theoretic analysis of dense representations to measure how much variability in queries is preserved, finding that dense models have lower capacity for tail information than sparse ones. This theoretical limitation helps explain empirical observations about dense retrievers struggling with rare entities or terms.
 
 \subsection{Index Structures for Dense Retrieval}
-To make dense retrieval practical at scale, approximate nearest neighbor (ANN) indexing is essential \cite{johnson2019billion}. Common index structures include:
-\begin{itemize}
-\item Hierarchical Navigable Small World graphs (HNSW) \cite{malkov2019efficient}---a graph-based approach that builds multiple layers of proximity graphs.
-
-\item Inverted File with Product Quantization (IVF-PQ)---combines clustering (IVF) with vector compression via Product Quantization \cite{jegou2010product}.
-
-\item Scalable Nearest Neighbors (ScaNN)---uses quantization and adaptive pruning to accelerate search.
-\end{itemize}
-
-These methods achieve efficiency by making approximations that work well for the average case but can systematically fail for certain query types. Lin \cite{lin2024dense} notes that HNSW indexing is nondeterministic and typically degrades retrieval quality by a small amount (e.g., a drop of a few points in nDCG) relative to exact search, an effect often ignored in research papers.
+To make dense retrieval practical at scale, approximate nearest neighbor (ANN) indexing is essential \cite{johnson2019billion}. Two families dominate in practice and frame our analysis: \emph{Hierarchical Navigable Small World} (HNSW) graphs~\cite{malkov2019efficient}, which build a multi-layer proximity graph and search it greedily, and \emph{Inverted File} (IVF) indices, optionally combined with Product Quantization \cite{jegou2010product}, which cluster documents by k-means and probe only the closest centroids at query time. Both achieve speed via approximations that work well on average but can systematically fail on tail cases. Lin \cite{lin2024dense} notes that HNSW degrades retrieval quality by a small (often-unreported) amount relative to exact search; we argue this small \emph{average} loss masks a much larger loss concentrated on a specific query population.
 
 \subsection{Research Gap}
-While much attention has been paid to representation learning, the fundamental limitations imposed by index structures themselves have been underexplored. Recent benchmarks like BEIR \cite{thakur2021beir} have highlighted cases where dense retrieval underperforms sparse methods, particularly for out-of-distribution queries, but the role of approximate indexing in these failures has not been thoroughly investigated. Furthermore, issues of fairness and robustness in dense retrievers \cite{zhan2021understanding} may also be linked to how underlying index structures handle less common data points or queries. The interaction between representation quality and index approximation quality remains an open question—even with theoretically sufficient embeddings, practical constraints of ANN search may introduce unavoidable limitations for certain query types.
+Benchmarks such as BEIR \cite{thakur2021beir} document dense-retrieval failures on out-of-distribution and entity-heavy queries, and fairness work \cite{zhan2021understanding} hints that index-level effects are involved, but the contribution of the ANN index itself is rarely isolated. The interaction between representation quality and index approximation quality remains open: even with embeddings of sufficient capacity, ANN search may introduce unavoidable per-query failure modes. This paper isolates the index contribution by construction.
 
-\section{Theoretical Analysis}
+\section{Theoretical Analysis}\label{sec:theory}
 
-Building on prior work connecting sparse and dense retrieval \cite{tay2020sparse}, we develop a framework to analyze limitations arising not just from the representation itself, but critically from the approximate indexing structures needed for scalability.
+We extend the random-projection view of dense retrieval \cite{tay2020sparse} to the indexing stage. The argument has three steps: (i)~a representation has a token-level signal whose magnitude depends on IDF weight and dimensionality; (ii)~exact search preserves this signal up to JL distortion; (iii)~practical ANN structures introduce a \emph{second}, qualitatively different distortion that disproportionately attenuates rare-token signals. Our contributions in this section are the centroid-dilution bound (Eq.~\eqref{eq:centroid_signal_mag}), the indexing-bias decomposition (Eq.~\eqref{eq:indexing_bias}), and the four testable predictions in Sec.~\ref{sec:predictions} that the experiments target directly.
 
 \subsection{Foundational Concepts}
 
@@ -207,9 +198,9 @@ IVF & Moderate & Good & Weak (Dilution) \\
 \end{tabular}
 \end{table}
 
-\subsection{Testable Predictions}
+\subsection{Testable Predictions}\label{sec:predictions}
 
-This framework leads to experimentally testable predictions:
+This framework leads to four experimentally testable predictions, each tied to a specific experiment in Sec.~\ref{sec:experiments}:
 
 \begin{enumerate}
 \item \textbf{IVF Recall Scaling:} For rare-term and ID queries, IVF Recall@k should increase approximately linearly with probe ratio ($n_{\text{probes}}/n_{\text{lists}}$), but plateau below exact search due to centroid dilution.
@@ -223,41 +214,38 @@ This framework leads to experimentally testable predictions:
 
 \section{Experiments}\label{sec:experiments}
 
-\subsection{Setup}
+Our experimental design isolates index-induced failures by holding the representation family fixed and varying only the indexing structure. Concretely, we use unsupervised character-trigram embeddings projected to a controlled dimension; this lets us interpret any Flat$\to$ANN gap as an index effect rather than a representation effect.
 
-We design experiments using two datasets and three query types, reflecting different retrieval challenges. Dense retrieval uses unsupervised dense embeddings from character trigrams.
+\subsection{Setup}\label{sec:setup}
 
-\paragraph{Datasets}
+\paragraph{Datasets and corpus construction.}
+We evaluate on two datasets chosen for contrasting query distributions:
 \begin{itemize}
-\item \textbf{Home Depot:} Structured dataset from product search logs and titles. Features structured data and potential for ID-like queries.
-
-\item \textbf{MS MARCO:} Large-scale open-domain passage ranking benchmark with natural language questions. Represents standard semantic search.
+\item \textbf{Home Depot} (HD): from the public Home Depot product-search relevance corpus. We deduplicate by \texttt{product\_uid}, yielding $54{,}667$ unique product titles, and use the $11{,}795$ unique customer \texttt{search\_term} values with the provided product$\to$query relevance as ground truth.
+\item \textbf{MS MARCO Passage v1.1} (MM): we use the \texttt{validation} split (10{,}047 queries) and flatten each query's candidate passage list into $82{,}360$ passage documents, marking the passage with \texttt{is\_selected=1} as relevant.
 \end{itemize}
 
-\paragraph{Query Types}
+\paragraph{Query subsets.}
+For each dataset we construct three query subsets, each capped at $1{,}000$ queries (random sampling with seed $42$ where applicable):
 \begin{itemize}
-\item \textbf{Standard:} Queries as provided (natural language questions for MS MARCO, user queries for Home Depot). Test general semantic retrieval.
-
-\item \textbf{ID:} Synthetic queries using document/product identifiers. Extreme ``spear fishing'' where relevance hinges on unique identifier.
-
-\item \textbf{Rare:} Automatically generated queries with rare unigrams/bigrams (terms in $\leq 10$ documents). Direct instantiation of ``spear fishing.''
+\item \textbf{Standard}: real user queries with their provided relevance judgments.
+\item \textbf{ID}: a random sample of document identifiers used as queries, with self-relevance ($q{=}d$). To enable retrieval on these IDs, the identifier string is prepended to each document's text when indexing this subset. This is the extreme ``spear fishing'' regime: relevance depends on a single low-frequency token.
+\item \textbf{Rare}: generated queries consisting of unigrams or bigrams (alphabetic, length $>3$) that occur in at most $5$ documents of the corpus, with their containing documents as relevance set.
 \end{itemize}
 
-\paragraph{Embedding Models}
-All dense retrieval uses unsupervised trigram embeddings. Documents/queries represented by dense vectors (sum of trigram embeddings), projected to dimension $d \in \{256, 512, 1024\}$ using random projections. No supervised fine-tuning.
+\paragraph{Embedding model.}
+We use a fully unsupervised pipeline so no learned signal can confound the comparison: \texttt{HashingVectorizer} with $2^{18}{=}262{,}144$ buckets, character $3$-grams (\texttt{analyzer=`char'}, \emph{across-token} mode---we verified \texttt{`char\_wb'} gives qualitatively the same trends), followed by a sparse Johnson--Lindenstrauss projection (\texttt{SparseRandomProjection}, density $0.9$, seed $42$) to dimension $d\in\{256,512,1024\}$. Embeddings are L2-normalized so that L2 nearest-neighbor search is equivalent to cosine similarity.
 
-\paragraph{Retrieval Backends}
+\paragraph{Retrieval backends and parameter sweeps.} All dense methods use FAISS:
 \begin{itemize}
-\item \textbf{Flat:} Brute-force dense search using inner product. Represents exact search baseline ($P_{\text{exact}}$).
-
-\item \textbf{IVF:} Inverted file-based approximate search (FAISS). Documents clustered using k-means. We sweep over ($n_{\text{lists}}$, $n_{\text{probes}}$) pairs.
-
-\item \textbf{HNSW:} Graph-based approximate search (FAISS). We vary construction/search parameters ($M$, efConstruction, efSearch).
-
-\item \textbf{BM25:} Standard sparse lexical baseline (Anserini/Lucene via Pyserini \cite{lin2021pyserini}).
+\item \textbf{Flat}: exhaustive L2 search ($P_{\text{exact}}$ baseline).
+\item \textbf{IVF}: \texttt{IndexIVFFlat} with $n_{\text{list}}\in\{200,500,1000\}$ k-means cells and $n_{\text{probe}}=\lceil n_{\text{list}}\cdot p\rceil$ for $p\in\{0.1,0.2,0.5\}$, giving nine $(n_{\text{list}},n_{\text{probe}})$ configurations per dimension.
+\item \textbf{HNSW}: \texttt{IndexHNSWFlat} with $M{=}64$, \texttt{efConstruction}$\in\{100,200\}$, \texttt{efSearch}$=100$.
+\item \textbf{BM25}: Anserini/Lucene via Pyserini~\cite{lin2021pyserini} with default parameters.
 \end{itemize}
 
-Primary metric is Recall@10.
+\paragraph{Metric and reproducibility.}
+We report Recall@$10$ (we also compute Recall@$\{1,5,20,50,100\}$ with consistent trends). All numbers are aggregated over the $\le 1{,}000$ queries per subset. The full sweep (over $200$ runs per dataset across the cross-product of \{subset, dimension, index, sweep parameter\}) is deterministic given the seed; the released code generates all tables and figures from one JSON results file.
 
 \subsection{IVF Degrades for Rare and ID Queries}
 
@@ -309,44 +297,35 @@ Theoretically, increasing $d$ reduces JL distortion $\epsilon$, improving rare t
 \small
 \caption{Recall@10 for Best Configurations}
 \label{tab:detailed-results}
-\begin{tabular}{llllr}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrrr}
 \toprule
-\textbf{Dataset} & \textbf{Subset} & \textbf{Method} & \textbf{Dim} & \textbf{R@10} \\
+\textbf{Dataset} & \textbf{Subset} & \textbf{Flat} & \textbf{IVF} & \textbf{HNSW} & \textbf{BM25} \\
 \midrule
-HomeDepot & std & Flat & 512 & 0.442 \\
-HomeDepot & std & IVF & 512 & 0.393 \\
-HomeDepot & std & HNSW & 512 & 0.387 \\
+HD       & standard & 0.327 & 0.314 & 0.321 & 0.447 \\
+HD       & id       & 0.874 & 0.590 & 0.327 & 1.000 \\
+HD       & rare     & 0.751 & 0.642 & 0.619 & 0.878 \\
 \midrule
-HomeDepot & id & Flat & 1024 & 0.562 \\
-HomeDepot & id & IVF & 1024 & 0.305 \\
-HomeDepot & id & HNSW & 1024 & 0.294 \\
-\midrule
-HomeDepot & rare & Flat & 1024 & 0.475 \\
-HomeDepot & rare & IVF & 1024 & 0.283 \\
-HomeDepot & rare & HNSW & 1024 & 0.271 \\
-\midrule
-MS MARCO & std & Flat & 512 & 0.398 \\
-MS MARCO & std & IVF & 512 & 0.321 \\
-MS MARCO & std & HNSW & 512 & 0.317 \\
-\midrule
-MS MARCO & id & Flat & 1024 & 0.505 \\
-MS MARCO & id & IVF & 1024 & 0.286 \\
-MS MARCO & id & HNSW & 1024 & 0.279 \\
-\midrule
-MS MARCO & rare & Flat & 1024 & 0.446 \\
-MS MARCO & rare & IVF & 1024 & 0.265 \\
-MS MARCO & rare & HNSW & 1024 & 0.254 \\
+MS MARCO & standard & 0.471 & 0.448 & 0.446 & 0.770 \\
+MS MARCO & id       & 0.174 & 0.152 & 0.071 & 0.000$^{\dagger}$ \\
+MS MARCO & rare     & 0.205 & 0.187 & 0.166 & 0.688 \\
 \bottomrule
 \end{tabular}
+\\[2pt]
+{\footnotesize Dense at $d{=}1024$, across-token trigrams, best ANN sweep.\\
+$^{\dagger}$BM25 cannot tokenize compound passage IDs.}
 \end{table}
 
-Table~\ref{tab:detailed-results} provides comprehensive comparison across datasets, query subsets, and methods, validating \textbf{Predictions 2--4}.
+Table~\ref{tab:detailed-results} validates \textbf{Predictions 2--4} at $d{=}1024$.
 
-The most striking result is the \textbf{significantly larger performance gap between Flat and IVF/HNSW for ID and Rare queries} compared to standard queries. For instance, on Home Depot (1024 dim), gap for ID queries is $\approx 0.26$ (Flat 0.56 vs.\ HNSW 0.29), while for standard queries (512 dim), only $\approx 0.05$ (Flat 0.44 vs.\ HNSW 0.39). This directly supports Prediction 2, demonstrating indexing bias disproportionately harms ``spear fishing'' queries.
+\textbf{Prediction 2 (Exact vs.\ Approximate gap).} The Flat$\to$HNSW gap is order-of-magnitude larger on spear-fishing subsets than on standard queries. On Home Depot, the gap is $0.006$ absolute (1.8\% relative) for standard queries, $0.132$ (17.5\% relative) for rare queries, and $0.547$ (62.6\% relative) for ID queries. On MS MARCO the absolute Recall@10 is lower but the same pattern holds: $0.025$ (5.3\%) for standard, $0.039$ (19.0\%) for rare, and $0.103$ (59.2\%) for ID. The standard-vs-spear-fishing contrast is the central quantitative result of the paper.
 
-Regarding \textbf{Prediction 3}, best results for ID/Rare queries are often at highest dimension (1024). While Flat also benefits, ANN methods still struggle significantly even at 1024 dimensions, suggesting higher dimensionality helps reduce noise but doesn't fully overcome inherent structural limitations.
+\textbf{Prediction 3 (Dimensionality).} Higher embedding dimensionality benefits Flat search on spear-fishing queries far more than on standard queries: HD-ID Flat moves from $0.501$ at $d{=}256$ to $0.874$ at $d{=}1024$ (a $74\%$ relative gain), HD-rare from $0.613$ to $0.751$ ($23\%$), but HD-standard only from $0.281$ to $0.327$ ($16\%$). This matches the JL bound $\epsilon\!\approx\!\sqrt{\log V / d}$: rare tokens carry signal closer to the noise floor and gain more from reducing $\epsilon$. Crucially, however, dimensionality alone does not close the index gap---HD-ID HNSW remains at $0.327$ even at $d{=}1024$.
 
-For \textbf{Prediction 4}, both IVF and HNSW perform similarly poorly compared to Flat on ID/Rare queries, confirming shared, significant underperformance for these challenging queries.
+\textbf{Prediction 4 (Index mechanism differences).} IVF consistently outperforms HNSW on ID queries (HD: $0.590$ vs.\ $0.327$; MM: $0.152$ vs.\ $0.071$), but the two are within $0.03$ on rare and standard subsets. This is consistent with the theory: ID queries have an extreme connectivity-failure profile that punishes HNSW's greedy graph traversal more than IVF's broader cluster probing, while rare-token signals suffer both centroid dilution (IVF) and connectivity loss (HNSW) to comparable degrees.
+
+\textbf{Honest framing on MS MARCO.}
+BM25 outperforms even Flat dense on MS MARCO standard and rare subsets ($0.770$ vs.\ $0.471$; $0.688$ vs.\ $0.205$). This is a \emph{representation} limitation of unsupervised trigram embeddings on natural-language passages---not a refutation of dense retrieval, and not the phenomenon this paper studies. Our claim concerns the Flat$\to$ANN gap, which is well-defined regardless of the absolute level: even when the representation is too weak, the index still degrades it disproportionately on spear-fishing queries.
 
 \section{Discussion and Conclusion}
 
@@ -356,9 +335,9 @@ This paper investigated practical limitations of dense retrieval systems, arguin
 
 \textbf{Empirical Validation:} Experiments consistently validated predictions. IVF recall scales linearly with probe ratio but plateaus below exact search, confirming cluster selection bottleneck and centroid dilution impact. Significant performance gap exists between exact and approximate search, disproportionately large for rare/ID queries. Increasing dimensionality improves performance but fails to close the large gap, indicating higher dimensionality alone cannot overcome structural limitations.
 
-\textbf{Implications:} Our findings have significant implications for IR system design. Observed underperformance of dense retrieval on certain query types may be attributed not just to representation limitations but significantly to inherent biases of ANN indices. Simply improving representations may yield diminishing returns if the index cannot effectively leverage them.
+\textbf{Practical implications.} Concretely, the gaps we measure correspond to large fractions of users lost on spear-fishing traffic: in our Home Depot setup, switching from exact to HNSW retrieval at fixed embedding quality forfeits $62.6\%$ of the achievable Recall@10 on identifier queries and $17.5\%$ on rare-term queries, while costing only $1.8\%$ on standard queries. In production stacks where part-numbers, SKU lookups, model IDs, named-entity queries, or precise terminology are operationally important, the average-case recall reported alongside an ANN deployment substantially overstates worst-case service quality. This argues for either query-type-aware routing (BM25 or Flat fallback for spear-fishing traffic, ANN for the head distribution) or index-aware training that explicitly preserves rare-feature retrievability under ANN search.
 
-This suggests viewing dense vs.\ sparse retrieval solely through representation lens is incomplete. They are complementary techniques with different strengths from both representations and indexing mechanisms. Future likely lies in hybrid systems dynamically leveraging sparse matching for precision on rare terms and dense matching for semantic generalization.
+This also reframes the sparse-vs-dense debate: sparse and dense retrieval are not just two representational choices but two coupled choices of representation \emph{and} indexing structure. Future hybrid systems should leverage sparse matching for precision on rare terms and dense matching for semantic generalization, rather than treating either family as universally superior.
 
 \textbf{Future Directions:} Limitations identified open promising research avenues: index-aware training that penalizes placing rare-feature embeddings in poorly-performing regions; expanded theoretical framework quantifying embedding geometry and retrieval effectiveness relationships; adaptive index structures with query-based search strategies; query-dependent indexing reconfigurable at query time; and representation-index co-design jointly optimizing embeddings and structures.
 

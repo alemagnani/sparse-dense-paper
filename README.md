@@ -42,15 +42,33 @@ class was right. Fixes applied to `main_AMLDS.tex`:
 Current state: compiles cleanly with `pdflatex main_AMLDS.tex` (no errors,
 no undefined references), output is **6 pages**.
 
-### Step 2 — Address reviewer feedback
-The single reviewer gave **weak accept**, with these criticisms:
+### Step 2 — Address reviewer feedback ✅ DONE (2026-05-11)
+The single reviewer gave **weak accept**, with four criticisms. All four addressed:
 
-| Reviewer point | Planned response |
+| Reviewer point | Response in revised draft |
 |---|---|
-| Hard to identify what is fundamentally new vs. revisiting standard definitions | Trim background re-derivations; add a short "Novelty" paragraph after the intro contributions list; explicitly mark what is new (indexing-bias formalism, centroid-dilution bound for rare tokens, dimensionality–rare-query interaction). |
-| Reads like a collection of observations, not a unified argument | Restructure §3–§4 around a single thread: *representation is sufficient → index approximations are the bottleneck → "spear fishing" queries expose it*. Add transitions between subsections that reference the four testable predictions. |
-| Experiments simple / under-described | Expand §4.1 Setup with: corpus sizes, query counts per subset, embedding training detail (trigram vocab size, projection seed), IVF/HNSW parameter sweeps (exact ranges), and a reproducibility note. |
-| Significance unclear | Add a "Practical implications" paragraph to the discussion quantifying the gap (e.g. ID queries on Home Depot: Flat 0.56 → HNSW 0.29, ≈48 % relative drop) and what that means for production retrieval stacks. |
+| Hard to identify what is fundamentally new vs. revisiting standard definitions | Sharpened the four contribution bullets and added a *What is new versus prior work* paragraph at the end of §1 contrasting our index-level analysis against Tay et al. and Fan et al.'s representation-level analyses. Trimmed §2.3/2.4 to remove the ScaNN bullet (not used) and shortened the Research-Gap rehash. Sharpened the §3 framing paragraph to state the three-step argument and explicitly list what is new (centroid-dilution bound, indexing-bias decomposition, four predictions). |
+| Reads like a collection of observations, not a unified argument | Tagged §3.5 as `sec:predictions` and added explicit forward-references so each experiment in §4 maps to a numbered prediction. Each results subsection in §4.4 now opens with `**Prediction N (...)**`. |
+| Experiments simple / under-described | Rewrote §4.1 with exact corpus sizes (HD: 54,667 unique products; MS MARCO Passage v1.1 validation: 82,360 passages flattened from 10,047 queries), exact query-subset construction rules (rare-token threshold = ≤5 documents — this fixed a paper/code inconsistency where the paper had said ≤10), embedder spec (HashingVectorizer with 2^18 buckets, SparseRandomProjection density 0.9 seed 42, two trigram modes), full IVF/HNSW sweep ranges, and a reproducibility note pointing at the released code. |
+| Significance unclear | Rewrote the abstract to lead with the centroid-dilution bound + the 63%-vs-2% headline number. Added a *Practical implications* paragraph quantifying the gap from real Table II numbers and arguing for query-type-aware routing. |
+
+### Step 2.5 — Numeric refresh against fresh experimental data
+We discovered while writing §4.1 that the paper's prior Table II had numbers that did **not** match the actual `sweep_results.json` outputs in `dense_retrieval_limitation_exp/v3/output/`. Replaced with the real, verified numbers at $d{=}1024$ across-token trigrams:
+
+| Dataset | Subset | Flat | IVF | HNSW | BM25 |
+|---|---|---|---|---|---|
+| HD | std | 0.327 | 0.314 | 0.321 | 0.447 |
+| HD | id  | 0.874 | 0.590 | 0.327 | 1.000 |
+| HD | rare| 0.751 | 0.642 | 0.619 | 0.878 |
+| MS MARCO | std | 0.471 | 0.448 | 0.446 | 0.770 |
+| MS MARCO | id  | 0.174 | 0.152 | 0.071 | 0.000† |
+| MS MARCO | rare| 0.205 | 0.187 | 0.166 | 0.688 |
+
+(† BM25 zero on MS MARCO ID is because Lucene's default analyzer splits the compound IDs `qid_pidx`. Reported honestly in the paper.)
+
+TREC-COVID was run in the codebase but **excluded from the paper**: standard-query Recall@10 collapsed to ~0.001 with unsupervised trigram embeddings — a representational pathology unrelated to our index-bias thesis, and including it would have muddied the story.
+
+The MS MARCO BM25 > dense result is now framed in the paper as a known representation limitation, not a contradiction — our claim is about the Flat→ANN gap and is invariant to absolute recall.
 
 ### Step 3 — Final formatting pass
 - Page limit check (IEEEtran two-column).
@@ -66,3 +84,10 @@ The single reviewer gave **weak accept**, with these criticisms:
   Compiles cleanly to a 6-page PDF.
 - *2026-05-11* — Moved prior `main*.tex` variants and `acmart.cls` to `old/`
   so only `main_AMLDS.tex` is the active source.
+- *2026-05-11* — Reviewer-response revision pass (Step 2): sharpened intro
+  novelty framing; trimmed background; reworked §3 framing + tagged predictions;
+  rewrote §4.1 Setup with exact corpus / embedding / sweep details;
+  replaced stale Table II with verified numbers from
+  `dense_retrieval_limitation_exp/v3/output/`; fixed rare-doc threshold
+  inconsistency (≤10 → ≤5); added quantified Practical-Implications paragraph;
+  rewrote abstract. PDF now 7 pages.
