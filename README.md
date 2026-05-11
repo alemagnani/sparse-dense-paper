@@ -91,3 +91,32 @@ The MS MARCO BM25 > dense result is now framed in the paper as a known represent
   `dense_retrieval_limitation_exp/v3/output/`; fixed rare-doc threshold
   inconsistency (≤10 → ≤5); added quantified Practical-Implications paragraph;
   rewrote abstract. PDF now 7 pages.
+- *2026-05-11* — Step 2 follow-up (short loop: B + C + stale-claim fix + §3 tighten):
+  - §3 merged into a tighter 2-subsection arc (Setup+Signal, Indexing Bias);
+    removed the meaningless `P(correct cluster)=G/N` equation, the undefined
+    `g(sim,conn)` HNSW eq, the qualitative Table I, and the hand-wavy
+    "density preference" bullets; added the one-line derivation showing where
+    the squared IDF in Eq. \eqref{eq:centroid_signal_mag} comes from.
+  - Fixed two false claims in §4.3: paper had said HD-256 surpasses BM25
+    and MS MARCO Flat-1024 surpasses BM25; real data shows neither holds.
+    Rewrote that subsection to lead with the dimension trend (HD-ID +74% rel
+    from 256→1024) and to note honestly that MS MARCO Flat < BM25 throughout.
+  - Added new figure **fig:ivf_nlist** (analysis B): IVF Recall@10 vs n_list
+    at fixed probe-ratio 0.5 — direct empirical test of centroid-dilution,
+    showing rare/ID gain 2-3× more from finer clustering than standard.
+    Generated from the existing sweep_results.json.
+  - Added MS MARCO panels (analysis C) alongside Home Depot in
+    fig:npnl_recall and fig:flat_dim_queries, so every figure now covers
+    both datasets symmetrically.
+  - PDF back to 6 pages.
+
+## Still on the longer list (run as a second loop)
+
+- **A** — Direct centroid-dilution measurement: compute
+  $|\langle c, \phi(t^\*)\rangle|$ over IVF clusters for rare tokens and
+  correlate with per-query retrieval failure. Strongest possible reviewer
+  rebuttal: turns "we observed the symptom" into "we measured the mechanism."
+- **D** — Per-query Recall@10=0 rate per (dataset, subset, index).
+- **E** — Recall@k curves for k ∈ {1, 5, 10, 20, 50, 100}.
+- **F** — Paired-bootstrap CIs on Flat–HNSW gap.
+- **G** — HNSW connectivity test: in-degree of "lost" documents vs retrieved.

@@ -73,130 +73,32 @@ Benchmarks such as BEIR \cite{thakur2021beir} document dense-retrieval failures 
 
 We extend the random-projection view of dense retrieval \cite{tay2020sparse} to the indexing stage. The argument has three steps: (i)~a representation has a token-level signal whose magnitude depends on IDF weight and dimensionality; (ii)~exact search preserves this signal up to JL distortion; (iii)~practical ANN structures introduce a \emph{second}, qualitatively different distortion that disproportionately attenuates rare-token signals. Our contributions in this section are the centroid-dilution bound (Eq.~\eqref{eq:centroid_signal_mag}), the indexing-bias decomposition (Eq.~\eqref{eq:indexing_bias}), and the four testable predictions in Sec.~\ref{sec:predictions} that the experiments target directly.
 
-\subsection{Foundational Concepts}
+\subsection{Setup and Signal Magnitude}\label{sec:theory-setup}
 
-We begin by outlining the core components of our model:
+Following Tay et al.~\cite{tay2020sparse}, we represent each document $d$ as the IDF-weighted sum of its token embeddings $f(d)=\sum_{t\in d}\alpha_t\phi(t)$, with $\|\phi(t)\|=1$ and $\alpha_t=\log(M/n_t)$ for corpus size $M$ and document frequency $n_t$. High-dimensional embeddings ($V$ buckets) are projected to dimension $d$ by a random matrix $W$; the Johnson--Lindenstrauss lemma~\cite{johnson1984extensions} preserves inner products up to multiplicative distortion $\epsilon\approx\sqrt{\log V/d}$.
 
-\begin{enumerate}[label=(\arabic*)]
-\item \textbf{Document Representation:} Following Tay et al.\ \cite{tay2020sparse}, each document $d$ is represented in an IDF-based manner as a sum of its token embeddings:
+\paragraph{Centroid signal for a rare token.} Consider a cluster $C$ of size $|C|\approx M/N$ used by an IVF index with $N$ clusters. Let $p=n_{t^*,C}/|C|$ be the in-cluster prevalence of rare token $t^*$. The centroid is $c=\frac{1}{|C|}\sum_{d\in C}f(d)$, so $c$ contains a term $\alpha_{t^*}\,p\,\phi(t^*)$. A query $q$ dominated by $t^*$ has embedding $\approx\alpha_{t^*}\phi(t^*)$ (modulo normalization), and the centroid score it elicits is
 \begin{equation}
-f(d) = \sum_{t\in d} \alpha_t\, \phi(t)
-\label{eq:doc_rep}
+\langle c, q\rangle \;\approx\; \alpha_{t^*}^2\,p \;=\; \log^2\!\left(\tfrac{M}{n_{t^*}}\right)\cdot\frac{n_{t^*,C}}{M/N}.
+\label{eq:centroid_signal_mag}
 \end{equation}
-where $\phi(t)$ is the dense embedding for token $t$ (assumed unit-norm, $\|\phi(t)\| = 1$), and $\alpha_t$ is its IDF weight.
+The squared IDF arises because $\alpha_{t^*}$ enters both the centroid (through document weighting) and the query side. This is our \emph{centroid-dilution bound}: as the index uses fewer, larger clusters (small $N$), $|C|$ grows and the rare-token signal in any one centroid shrinks.
 
-\item \textbf{Rare Token Characteristics:} Consider a rare token $t^*$ appearing infrequently in the corpus. Let $M$ be the total number of documents and $n_{t^*}$ be the number of documents containing $t^*$. A common IDF weight is:
+\paragraph{Loss condition.} JL projection injects noise of magnitude $\epsilon$ into inner products. The rare-token signal is lost when
 \begin{equation}
-\alpha_{t^*} = \log\left(\frac{M}{n_{t^*}}\right)
-\label{eq:idf_weight}
-\end{equation}
-For rare tokens ($n_{t^*} \ll M$), this weight $\alpha_{t^*}$ is large, meaning the token carries significant identifying information in sparse models like BM25.
-
-\item \textbf{Dimensionality Reduction via Random Projection:} High-dimensional embeddings (dimension $V$) are often projected to lower dimension $d$ using random projection matrix $W\in \mathbb{R}^{d\times V}$. The Johnson-Lindenstrauss lemma \cite{johnson1984extensions} guarantees distance preservation: for any vector $x$,
-\begin{equation}
-(1-\epsilon)\|x\|^2 \leq \|W x\|^2 \leq (1+\epsilon)\|x\|^2
-\label{eq:jl_lemma}
-\end{equation}
-with high probability. The distortion $\epsilon$ is bounded by:
-\begin{equation}
-\epsilon \approx \sqrt{\frac{\log V}{d}}
-\label{eq:jl_error_bound}
-\end{equation}
-\end{enumerate}
-
-\subsection{Signal Loss for Rare Tokens}
-
-In dense retrieval, the relevance signal for token $t^*$ within document embedding $f(d)$ is carried by term $\alpha_{t^*} \phi(t^*)$. When documents are grouped by indexing structures (e.g., clusters), the effective signal strength of $t^*$ becomes crucial.
-
-Consider an aggregate representation $c$ (e.g., cluster centroid) from document set $C$. The expected contribution of rare token $t^*$ to aggregate $c$ depends on its IDF weight $\alpha_{t^*}$ and prevalence $p$ within group $C$. Let $p$ be the fraction of documents in $C$ containing $t^*$. The signal magnitude $\Delta_{t^*}$ is proportional to $\alpha_{t^*}^2 p$.
-
-The signal becomes lost when its magnitude is overwhelmed by projection noise:
-\begin{equation}
-\|\Delta_{t^*}\| \lesssim \epsilon \approx \sqrt{\frac{\log V}{d}}
+\alpha_{t^*}^2\,p \;\lesssim\; \epsilon \;\approx\; \sqrt{\tfrac{\log V}{d}}.
 \label{eq:signal_loss_general}
 \end{equation}
-
-This highlights a fundamental tension: rare but important tokens (high $\alpha_{t^*}$) might be lost if sparsely distributed within index groups (low $p$) or if projection is too aggressive (high $\epsilon$).
+Increasing $d$ \emph{reduces} $\epsilon$ and so helps rare-token retrieval, but cannot raise $\alpha_{t^*}^2 p$. So dimensionality alone cannot rescue retrieval when $p$ is too small---i.e., when cluster granularity is too coarse.
 
 \subsection{Indexing Bias}
 
-Exact nearest neighbor search over dense vectors $z = Wf(d)$ would preserve the relevance signal, subject only to JL distortion $\epsilon$. However, exact search is computationally infeasible for large corpora. Practical dense retrieval relies on ANN algorithms.
-
-ANN algorithms achieve speed through approximations, leading to \textbf{indexing bias}: a systematic discrepancy between retrieval probability using exact versus approximate search:
+Exact (Flat) nearest-neighbor search over $z=Wf(d)$ preserves these inner products up to JL distortion. ANN structures introduce a \emph{second} source of error, captured by the \emph{indexing bias}
 \begin{equation}
-\text{Bias}(q, d) = P_{\text{exact}}(\text{ret}(q, d)) - P_{\text{approx}}(\text{ret}(q, d))
+\mathrm{Bias}(q,d) \;=\; P_{\text{exact}}(\mathrm{ret}(q,d)) \;-\; P_{\text{approx}}(\mathrm{ret}(q,d)).
 \label{eq:indexing_bias}
 \end{equation}
-
-This bias arises because ANN methods often favor certain regions:
-\begin{itemize}
-    \item \textbf{Density Preference:} Many ANN methods navigate densely populated regions more effectively. Outliers or documents in sparse regions may be harder to find.
-    
-    \item \textbf{Approximation Errors:} Quantization, graph traversal heuristics, and limited probing introduce errors where true nearest neighbors might be missed.
-\end{itemize}
-
-Indexing bias particularly harms ``spear fishing'' queries, where relevance hinges on specific, potentially rare information defining less populated regions in embedding space.
-
-\subsection{Index-Specific Bottlenecks}
-
-\subsubsection{IVF / Clustering-based Indices}
-
-Inverted File (IVF) indices partition the document embedding space into $N$ clusters. Each cluster $C$ is represented by centroid $c$:
-\begin{equation}
-c = \frac{1}{|C|}\sum_{d\in C} f(d)
-\label{eq:centroid_calc}
-\end{equation}
-
-During search for query $q$, only a subset $G = n_{\text{probes}}$ of clusters with closest centroids are searched.
-
-This suffers from two issues for rare tokens $t^*$:
-
-\textbf{1. Centroid Dilution:} The contribution $\Delta_{t^*}$ of rare token $t^*$ to centroid $c$ is averaged over all $|C| \approx M/N$ documents. Assuming $t^*$ appears in $n_{t^*,C}$ documents within cluster $C$, probability $p = n_{t^*,C} / |C|$. The magnitude is:
-\begin{equation}
-\|\Delta_{t^*}\| \approx \alpha_{t^*}^2 p = \left[\log\left(\frac{M}{n_{t^*}}\right)\right]^2 \cdot \frac{n_{t^*,C}}{M/N}
-\label{eq:centroid_signal_mag}
-\end{equation}
-
-Even in the best case where all occurrences fall into one cluster, if this magnitude falls below noise threshold $\epsilon$, the centroid will not reflect $t^*$ presence.
-
-\textbf{2. Cluster Selection Failure:} Retrieval requires selecting correct cluster(s). If the $t^*$ signal in the centroid is diluted, the correct cluster may not be among top $G$ probed. The probability is roughly:
-\begin{equation}
-\mathbb{P}(\text{correct cluster}) \approx \frac{G}{N} = \frac{n_{\text{probes}}}{n_{\text{lists}}}
-\label{eq:ivf_probe_prob}
-\end{equation}
-
-\subsubsection{HNSW / Graph-based Indices}
-
-HNSW \cite{malkov2019efficient} builds multi-layer graphs where nodes are document embeddings. Search traverses the graph greedily towards the query embedding.
-
-HNSW faces challenges with rare-token queries due to:
-
-\textbf{1. Sparse Connectivity:} Embeddings dominated by rare tokens might reside in sparsely populated ``outlier'' regions with poor graph connectivity. Search might fail to navigate into these regions.
-
-\textbf{2. Traversal Errors:} Greedy search is heuristic. Even with good connectivity, the search path might diverge, especially when subtle differences distinguish the target.
-
-The retrieval probability depends on both similarity and graph structure:
-\begin{equation}
-P_{\text{approx}}(\text{ret}(q, d)) = g(\text{sim}(z_q, z_d), \text{conn}(z_d))
-\label{eq:hnsw_retrieval_prob}
-\end{equation}
-
-For rare queries, $z_d$ might be in low-density/poorly-connected regions, reducing $P_{\text{approx}}$ significantly.
-
-\begin{table}[t]
-\centering
-\small
-\caption{Comparative Analysis of Index Limitations}
-\label{tab:comparison_revised}
-\begin{tabular}{lccc}
-\toprule
-\textbf{Index} & \textbf{Efficiency} & \textbf{Common} & \textbf{Rare (Failure)} \\
-\midrule
-HNSW & High & Strong & Weak (Connectivity) \\
-IVF & Moderate & Good & Weak (Dilution) \\
-\bottomrule
-\end{tabular}
-\end{table}
+For IVF, this manifests as \emph{cluster-selection failure}: the correct cluster is missed when its centroid signal in Eq.~\eqref{eq:centroid_signal_mag} falls below the noise floor, even though the document containing $t^*$ would have ranked highly under Flat search of that cluster. For HNSW, it manifests as \emph{sparse connectivity}: documents whose embeddings are dominated by rare tokens occupy low-density regions of the embedding space, and the greedy graph traversal from typical entry points rarely reaches them. Both failure modes attack the same population of queries---those whose relevance hinges on rare, high-IDF tokens---which we call \emph{spear-fishing} queries.
 
 \subsection{Testable Predictions}\label{sec:predictions}
 
@@ -247,48 +149,39 @@ We use a fully unsupervised pipeline so no learned signal can confound the compa
 \paragraph{Metric and reproducibility.}
 We report Recall@$10$ (we also compute Recall@$\{1,5,20,50,100\}$ with consistent trends). All numbers are aggregated over the $\le 1{,}000$ queries per subset. The full sweep (over $200$ runs per dataset across the cross-product of \{subset, dimension, index, sweep parameter\}) is deterministic given the seed; the released code generates all tables and figures from one JSON results file.
 
-\subsection{IVF Degrades for Rare and ID Queries}
+\subsection{IVF Recall Scales with Probe Ratio but Plateaus Below Flat}
 
 \begin{figure}[t]
-\centerline{\includegraphics[width=\columnwidth]{figures/home_id_npnl.png}}
-\centerline{\includegraphics[width=\columnwidth]{figures/home_rare_npnl.png}}
-\caption{Recall@10 vs.\ probe ratio (np/nl) for IVF and Flat on Home Depot (ID and Rare queries, dim=1024). Flat consistently outperforms IVF. IVF recall scales roughly linearly with probe ratio but remains significantly lower than Flat.}
+\centerline{\includegraphics[width=0.49\columnwidth]{figures/home_id_npnl.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/msmarco_id_npnl.png}}
+\centerline{\includegraphics[width=0.49\columnwidth]{figures/home_rare_npnl.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/msmarco_rare_npnl.png}}
+\caption{Recall@10 vs.\ probe ratio $n_{\text{probes}}/n_{\text{list}}$ for IVF (blue) and Flat (green dashed), $d{=}1024$. Top: ID queries; bottom: rare queries. Left: Home Depot; right: MS MARCO. The IVF cloud grows with probe ratio but stays well below Flat on every panel.}
 \label{fig:npnl_recall}
 \end{figure}
 
-Figure~\ref{fig:npnl_recall} directly tests \textbf{Prediction 1} (IVF Recall Scaling) and provides evidence for \textbf{Prediction 2} (Exact vs.\ Approximate Gap).
+Figure~\ref{fig:npnl_recall} tests \textbf{Prediction 1}. IVF Recall@10 rises monotonically (though sub-linearly in absolute terms) with $n_{\text{probes}}/n_{\text{list}}$, consistent with broader cluster probing finding more correct clusters; but it plateaus well below Flat even at probe-ratio $0.5$. The persistent gap supports \textbf{Prediction 2}: even when the correct cluster is probed, retrieval within that cluster often fails because the rare-token signal in the centroid was below threshold and the index does not re-rank reliably within the probed cells.
 
-As predicted, Recall@10 for IVF grows approximately linearly with probe ratio ($n_{\text{probes}}/n_{\text{lists}}$), reflecting increasing probability of searching the correct cluster. However, critically, even when probing a large fraction of clusters, IVF recall plateaus significantly below Flat search performance.
-
-This persistent gap validates \textbf{Prediction 2} and points to index structure limitations. The linearity confirms cluster selection bottleneck, while the gap suggests that even when correct cluster is probed, retrieval often fails. This is attributed to \textbf{centroid dilution}, where the rare signal within the centroid is insufficient for robust retrieval.
-
-\subsection{Trigram Embeddings on Standard Queries}
+\subsection{Finer Clustering Helps Rare/ID More Than Standard}
 
 \begin{figure}[t]
-\centerline{\includegraphics[width=\columnwidth]{figures/home_standard_dim.png}}
-\centerline{\includegraphics[width=\columnwidth]{figures/msmarco_standard_dim.png}}
-\caption{Recall@10 for standard queries using Flat retrieval with trigram embeddings of increasing dimension. BM25 baseline shown as dashed line.}
-\label{fig:standard_dim}
+\centerline{\includegraphics[width=\columnwidth]{figures/ivf_nlist_sensitivity.png}}
+\caption{IVF Recall@10 vs.\ $n_{\text{list}}$ at probe ratio $0.5$, $d{=}1024$. Smaller cluster sizes (larger $n_{\text{list}}$) help \emph{rare} and \emph{ID} queries roughly 2--3$\times$ more (in relative terms) than standard queries on both datasets, a direct empirical test of the centroid-dilution bound in Eq.~\eqref{eq:centroid_signal_mag}.}
+\label{fig:ivf_nlist}
 \end{figure}
 
-Figure~\ref{fig:standard_dim} evaluates unsupervised trigram embeddings using exact (Flat) search on standard queries. On Home Depot, even 256-dim embeddings surpass BM25. On MS MARCO, performance improves with dimensionality, eventually outperforming BM25 at 1024 dimensions.
+Figure~\ref{fig:ivf_nlist} provides a direct test of the centroid-dilution mechanism. Eq.~\eqref{eq:centroid_signal_mag} predicts the per-centroid signal magnitude grows linearly with $N$ (smaller $|C|$ keeps higher in-cluster prevalence $p$), so spear-fishing queries should benefit more from finer clustering than standard queries. We observe exactly this asymmetry: going from $n_{\text{list}}{=}200$ to $1000$ improves rare-query Recall@10 by $+0.079$ on HD and $+0.025$ on MS MARCO (14\% and 15\% relative), versus only $+0.019$ and $+0.021$ (6\% and 5\% relative) for standard queries.
 
-This confirms underlying dense representations have capacity for semantic retrieval. Performance increase with dimension aligns with expectation that lower JL distortion $\epsilon$ improves representation fidelity. However, effectiveness on standard queries with exact search contrasts sharply with failures for approximate search on rare/ID queries, emphasizing the bottleneck lies within the approximate index.
-
-\subsection{Flat Search vs.\ Dimensionality}
+\subsection{Embedding Dimensionality on Exact Search}
 
 \begin{figure}[t]
-\centerline{\includegraphics[width=\columnwidth]{figures/flat_dim_home_id.png}}
-\centerline{\includegraphics[width=\columnwidth]{figures/flat_dim_home_rare.png}}
-\caption{Flat Recall@10 for ID and Rare queries (Home Depot) as function of embedding dimension. BM25 baseline shown.}
+\centerline{\includegraphics[width=0.49\columnwidth]{figures/flat_dim_home_id.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/flat_dim_msmarco_id.png}}
+\centerline{\includegraphics[width=0.49\columnwidth]{figures/flat_dim_home_rare.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/flat_dim_msmarco_rare.png}}
+\caption{Flat Recall@10 vs.\ embedding dimension $d$ for ID (top) and rare (bottom) queries, on Home Depot (left) and MS MARCO (right). BM25 shown as dashed reference.}
 \label{fig:flat_dim_queries}
 \end{figure}
 
-Figure~\ref{fig:flat_dim_queries} examines dimensionality impact on exact (Flat) search for ID and Rare queries, testing \textbf{Prediction 3}.
+Figure~\ref{fig:flat_dim_queries} tests \textbf{Prediction 3} on the representation side. Increasing $d$ from $256$ to $1024$ improves Flat Recall@10 by $+74\%$ relative on HD-ID and $+23\%$ on HD-rare, but only $+16\%$ on HD-standard. The trend is monotone and consistent with the JL bound $\epsilon\!\propto\!1/\sqrt{d}$: rare tokens carry signal closer to the noise floor and gain more from a thicker representation. Importantly, this benefit applies to \emph{exact} search; under approximate search the same $d{=}1024$ embedding stalls at $0.327$ for HNSW on HD-ID, confirming the index, not the representation, is the binding constraint.
 
-Results show that even with exact search, increasing dimensionality generally improves or maintains high recall. For ID queries, performance is very high at 256 dimensions. For Rare queries, clearer benefit from increasing dimensions (256 to 512).
-
-Theoretically, increasing $d$ reduces JL distortion $\epsilon$, improving rare token signal preservation. This confirms higher dimensionality makes underlying representation more robust for capturing rare signals, even before considering ANN approximations.
+Note that on MS MARCO, even the best Flat dense recall is below BM25 on standard and rare subsets. This is a known limitation of unsupervised character-trigram embeddings on natural-language passages and is independent of our index-bias claim, which concerns the Flat$\to$ANN gap rather than the absolute level.
 
 \subsection{Detailed Performance Comparison}
 
