@@ -1,0 +1,128 @@
+[
+  {
+    "dataset": "HD",
+    "subset": "standard",
+    "backend": "Flat",
+    "zero_R10_rate": 0.371,
+    "mean_R10": 0.3137867188367188
+  },
+  {
+    "dataset": "HD",
+    "subset": "standard",
+    "backend": "IVF",
+    "zero_R10_rate": 0.382,
+    "mean_R10": 0.3007182844932845
+  },
+  {
+    "dataset": "HD",
+    "subset": "standard",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.378,
+    "mean_R10": 0.30451601176601173
+  },
+  {
+    "dataset": "HD",
+    "subset": "rare",
+    "backend": "Flat",
+    "zero_R10_rate": 0.199,
+    "mean_R10": 0.75725
+  },
+  {
+    "dataset": "HD",
+    "subset": "rare",
+    "backend": "IVF",
+    "zero_R10_rate": 0.292,
+    "mean_R10": 0.6612333333333333
+  },
+  {
+    "dataset": "HD",
+    "subset": "rare",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.333,
+    "mean_R10": 0.6274666666666667
+  },
+  {
+    "dataset": "HD",
+    "subset": "id",
+    "backend": "Flat",
+    "zero_R10_rate": 0.134,
+    "mean_R10": 0.866
+  },
+  {
+    "dataset": "HD",
+    "subset": "id",
+    "backend": "IVF",
+    "zero_R10_rate": 0.457,
+    "mean_R10": 0.543
+  },
+  {
+    "dataset": "HD",
+    "subset": "id",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.71,
+    "mean_R10": 0.29
+  },
+  {
+    "dataset": "MM",
+    "subset": "standard",
+    "backend": "Flat",
+    "zero_R10_rate": 0.5108583247156153,
+    "mean_R10": 0.4705274043433299
+  },
+  {
+    "dataset": "MM",
+    "subset": "standard",
+    "backend": "IVF",
+    "zero_R10_rate": 0.532574974146846,
+    "mean_R10": 0.44777662874870733
+  },
+  {
+    "dataset": "MM",
+    "subset": "standard",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.5294725956566702,
+    "mean_R10": 0.45191313340227507
+  },
+  {
+    "dataset": "MM",
+    "subset": "rare",
+    "backend": "Flat",
+    "zero_R10_rate": 0.771,
+    "mean_R10": 0.19638333333333333
+  },
+  {
+    "dataset": "MM",
+    "subset": "rare",
+    "backend": "IVF",
+    "zero_R10_rate": 0.79,
+    "mean_R10": 0.18133333333333332
+  },
+  {
+    "dataset": "MM",
+    "subset": "rare",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.83,
+    "mean_R10": 0.14583333333333331
+  },
+  {
+    "dataset": "MM",
+    "subset": "id",
+    "backend": "Flat",
+    "zero_R10_rate": 0.778,
+    "mean_R10": 0.222
+  },
+  {
+    "dataset": "MM",
+    "subset": "id",
+    "backend": "IVF",
+    "zero_R10_rate": 0.816,
+    "mean_R10": 0.184
+  },
+  {
+    "dataset": "MM",
+    "subset": "id",
+    "backend": "HNSW",
+    "zero_R10_rate": 0.916,
+    "mean_R10": 0.084
+  }
+]
