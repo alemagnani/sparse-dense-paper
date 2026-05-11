@@ -22,7 +22,7 @@ ale.magnani@gmail.com}
 \maketitle
 
 \begin{abstract}
-Dense retrieval relies on approximate nearest-neighbor (ANN) indices such as HNSW and IVF for practical deployment. Prior theoretical work has focused on the \emph{representational} capacity of dense embeddings; we show that the \emph{indexing} stage imposes a separate, quantifiable bottleneck. We introduce \emph{indexing bias}---the systematic gap between exact and approximate retrieval probability---and derive a centroid-dilution bound linking IDF-weighted token rarity, embedding dimensionality, and cluster granularity. We then isolate index-induced failures empirically by holding the representation fixed (random-projection trigram embeddings at varying dimensions) and varying only the indexing structure on Home Depot product search and MS MARCO Passage. On so-called \emph{spear-fishing} queries---those depending on identifiers or rare terms---switching from exact to HNSW search forfeits up to $63\%$ of the achievable Recall@10, versus less than $2\%$ for standard semantic queries. Increasing embedding dimensionality reduces representation noise but does not close this index-induced gap. The results reframe the sparse-vs-dense trade-off as a joint choice of representation and indexing, with direct implications for production retrieval stacks where part-number, SKU, and named-entity queries are operationally important.
+Dense retrieval relies on approximate nearest-neighbor (ANN) indices such as HNSW and IVF for practical deployment. Prior theoretical work has focused on the \emph{representational} capacity of dense embeddings; we show that the \emph{indexing} stage imposes a separate, quantifiable bottleneck. We introduce \emph{indexing bias}---the systematic gap between exact and approximate retrieval probability---and derive a centroid-dilution bound linking IDF-weighted token rarity, embedding dimensionality, and cluster granularity. We isolate index-induced failures empirically by holding the representation fixed (random-projection trigram embeddings at varying dimensions) and varying only the indexing structure on Home Depot product search and MS MARCO Passage; we further \emph{directly measure} the centroid signal on each query, observing a $\sim\!40\times$ collapse from standard to identifier queries that closes the inference gap between theory and observation. On so-called \emph{spear-fishing} queries---those depending on identifiers or rare terms---switching from exact to HNSW search forfeits up to $63\%$ of the achievable Recall@10, versus less than $2\%$ for standard semantic queries. Increasing embedding dimensionality reduces representation noise but does not close this index-induced gap. The results reframe the sparse-vs-dense trade-off as a joint choice of representation and indexing, with direct implications for production retrieval stacks where part-number, SKU, and named-entity queries are operationally important.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -42,7 +42,7 @@ We make the following contributions:
 \begin{itemize}
     \item We formalize the concept of ``spear fishing'' queries and demonstrate theoretically why standard ANN indices (IVF and HNSW) struggle with them, \emph{independent of the representation's theoretical capacity}.
 
-    \item We derive a \emph{centroid-dilution bound} that links IDF-weighted token rarity, embedding dimensionality $d$, and clustering granularity to the probability that an IVF centroid fails to carry a rare token's signal above the Johnson--Lindenstrauss noise floor.
+    \item We derive a \emph{centroid-dilution bound} that links IDF-weighted token rarity, embedding dimensionality $d$, and clustering granularity to the probability that an IVF centroid fails to carry a rare token's signal above the Johnson--Lindenstrauss noise floor, and we \emph{directly measure} this signal on each query, showing it drops $\sim\!40\times$ from standard to ID queries on Home Depot.
 
     \item We isolate index-induced failure empirically by comparing exact (Flat) and approximate (IVF, HNSW) search on a controlled three-axis design (two datasets $\times$ three query types $\times$ three embedding dimensions), and quantify the resulting \emph{indexing bias}.
 
@@ -169,6 +169,45 @@ Figure~\ref{fig:npnl_recall} tests \textbf{Prediction 1}. IVF Recall@10 rises mo
 \end{figure}
 
 Figure~\ref{fig:ivf_nlist} provides a direct test of the centroid-dilution mechanism. Eq.~\eqref{eq:centroid_signal_mag} predicts the per-centroid signal magnitude grows linearly with $N$ (smaller $|C|$ keeps higher in-cluster prevalence $p$), so spear-fishing queries should benefit more from finer clustering than standard queries. We observe exactly this asymmetry: going from $n_{\text{list}}{=}200$ to $1000$ improves rare-query Recall@10 by $+0.079$ on HD and $+0.025$ on MS MARCO (14\% and 15\% relative), versus only $+0.019$ and $+0.021$ (6\% and 5\% relative) for standard queries.
+
+\subsection{Direct Measurement of the Centroid Signal}\label{sec:dilution-measured}
+
+\begin{figure}[t]
+\centerline{\includegraphics[width=\columnwidth]{figures/centroid_signal_by_subset.png}}
+\caption{Per-query centroid signal $\langle q, c_{\text{rel}}\rangle$ measured on the IVF centroid of each query's relevant cluster, at $n_{\text{list}}{=}500$, $d{=}1024$. Boxes show distribution across queries within each subset. The median signal drops $\sim\!40\times$ from \emph{standard} to \emph{ID} on Home Depot (0.279$\to$0.007), a direct empirical instantiation of the centroid-dilution bound in Eq.~\eqref{eq:centroid_signal_mag}.}
+\label{fig:centroid_signal}
+\end{figure}
+
+\begin{figure}[t]
+\centerline{\includegraphics[width=\columnwidth]{figures/cluster_rank_cdf.png}}
+\caption{CDF of the rank, among all $500$ centroids, of each query's relevant cluster. Dashed line marks $n_{\text{probes}}{=}250$ (probe-ratio $0.5$); queries to the right of it are \emph{guaranteed misses} for IVF regardless of in-cluster retrieval quality. For ID queries, $41$--$47\%$ of relevant clusters fall outside the top-half by centroid score.}
+\label{fig:cluster_rank}
+\end{figure}
+
+To move beyond inferring centroid dilution from aggregate Recall@10 numbers, we measure it directly per query. For each query $q$ with relevant document set $D_q$, we compute the centroid signal $\langle q, c_{\text{rel}}\rangle$ where $c_{\text{rel}}$ is the centroid of the cluster $C\ni d^*$ for the relevant document $d^*\!\in\! D_q$ with the highest such inner product (the easiest cluster $q$ could plausibly retrieve). We also compute the \emph{rank} of $c_{\text{rel}}$ among all $500$ centroids, ordered by inner product with $q$.
+
+Table~\ref{tab:centroid-stats} summarizes the result. The median centroid signal collapses monotonically across the three subsets: from $0.279$ on HD-standard, to $0.066$ on HD-rare, to $0.007$ on HD-ID---a $40\times$ drop. Cluster rank shows the same effect from the search side: the relevant cluster is the $2$nd-best centroid for the median standard query, the $69$th for the median rare query, and the $216$th (out of $500$) for the median ID query, i.e.\ effectively indistinguishable from random among the bottom half. At probe-ratio $0.5$ ($n_{\text{probes}}{=}250$), this translates into $40.9\%$ of HD-ID queries being \emph{structurally unrecoverable}: their correct cluster is never even probed, no matter how good the within-cluster retrieval is. This is the mechanism behind the Recall@10 gap reported in Table~\ref{tab:detailed-results}, measured directly rather than inferred.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Direct centroid-dilution measurement on the IVF index ($n_{\text{list}}{=}500$, $d{=}1024$). Hit@250 = fraction of queries whose relevant cluster ranks in the top $250$ centroids and would therefore be probed at probe-ratio $0.5$.}
+\label{tab:centroid-stats}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrr}
+\toprule
+\textbf{Dataset} & \textbf{Subset} & \textbf{Med.\ signal} & \textbf{Med.\ rank} & \textbf{Hit@250} \\
+\midrule
+HD       & standard & 0.279 &   2 & 0.972 \\
+HD       & rare     & 0.066 &  69 & 0.809 \\
+HD       & id       & 0.007 & 216 & 0.591 \\
+\midrule
+MS MARCO & standard & 0.236 &  20 & 0.907 \\
+MS MARCO & rare     & 0.077 & 113 & 0.794 \\
+MS MARCO & id       & 0.011 & 236 & 0.532 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Embedding Dimensionality on Exact Search}
 

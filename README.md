@@ -112,10 +112,20 @@ The MS MARCO BM25 > dense result is now framed in the paper as a known represent
 
 ## Still on the longer list (run as a second loop)
 
-- **A** — Direct centroid-dilution measurement: compute
-  $|\langle c, \phi(t^\*)\rangle|$ over IVF clusters for rare tokens and
-  correlate with per-query retrieval failure. Strongest possible reviewer
-  rebuttal: turns "we observed the symptom" into "we measured the mechanism."
+- **A** ✅ DONE (2026-05-11) — Direct centroid-dilution measurement.
+  Built fresh IVF (n_list=500, d=1024) on each dataset, computed
+  cos(q, c_rel) per query, and the rank of the relevant cluster among
+  all 500 centroids. Headline:
+
+  | Subset | HD med signal | HD med rank | HD hit@250 | MM med signal | MM med rank | MM hit@250 |
+  |---|---|---|---|---|---|---|
+  | standard | 0.279 | 2 | 97% | 0.236 | 20 | 91% |
+  | rare     | 0.066 | 69 | 81% | 0.077 | 113 | 79% |
+  | id       | 0.007 | 216 | 59% | 0.011 | 236 | 53% |
+
+  40× collapse from standard to ID on HD — Eq. (8) directly confirmed.
+  Added as new subsection §4.5 with two figures + Table III.
+  Script: `dense_retrieval_limitation_exp/v3/centroid_dilution_analysis.py`.
 - **D** — Per-query Recall@10=0 rate per (dataset, subset, index).
 - **E** — Recall@k curves for k ∈ {1, 5, 10, 20, 50, 100}.
 - **F** — Paired-bootstrap CIs on Flat–HNSW gap.
