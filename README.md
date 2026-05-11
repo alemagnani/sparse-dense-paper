@@ -19,28 +19,28 @@ Working repository for:
 | File | Purpose |
 |---|---|
 | `main_AMLDS.tex` | **Working camera-ready copy** for the AMLDS submission. Edits go here. |
-| `main.tex` | Pre-acceptance IEEEtran version (anonymous). Reference; do not edit. |
-| `main_asse.tex`, `main_asse_old.tex` | Older ACM `acmart` variants. Reference only. |
-| `main_2.tex`, `main_3.tex` | Earlier drafts. Reference only. |
-| `references.bib` | Shared bibliography (currently not loaded — bibitems are inline in `main.tex`). |
+| `main_AMLDS.pdf` | Latest compiled PDF (regenerate with `pdflatex main_AMLDS.tex`). |
+| `references.bib` | Shared bibliography (currently not loaded — bibitems are inline in the tex). |
 | `figures/` | All paper figures (PNG). |
 | `amlds_template/` | Official AMLDS / IEEEtran template + example PDF. |
-| `acmart.cls` | Legacy ACM class (kept so old variants still compile). |
+| `old/` | Archived prior versions (`main.tex`, `main_asse*.tex`, `main_2/3.tex`, `acmart.cls`). Not built; kept for reference only. |
 
 ## What we are doing and why
 
-### Step 1 — Get `main_AMLDS.tex` compiling under the official AMLDS template
-The existing `main.tex` already uses `IEEEtran` `[conference,anonymous]`, so the
-class is right. Known issues to fix before first compile:
+### Step 1 — Get `main_AMLDS.tex` compiling under the official AMLDS template ✅ DONE (2026-05-11)
+The existing `main.tex` already used `IEEEtran` `[conference,anonymous]`, so the
+class was right. Fixes applied to `main_AMLDS.tex`:
 
-1. **Duplicated `\end{document}` and duplicated `\bibitem` entries** at the tail of
-   the file (paste leftover after the first `\end{document}` on line ~411). Will
-   break compilation — must be removed.
-2. **Unused packages** (`algorithm`, `algorithmic`) — no algorithm environment is
-   used. Trim.
-3. **De-anonymize** — replace `Anonymous Author(s)` author block with real author
-   info for the camera-ready.
-4. Verify all `\includegraphics` paths resolve against `figures/`.
+1. Removed the duplicated `\end{document}` and duplicated `\bibitem` entries that
+   were pasted after the first `\end{document}` (lines ~411+).
+2. Removed unused `algorithm` / `algorithmic` packages.
+3. Removed the `anonymous` class option and replaced the author block with
+   *Alessandro Magnani, Independent Researcher, ale.magnani@gmail.com* (update
+   the affiliation before sending the final).
+4. Commented out the placeholder "Acknowledgments withheld" section.
+
+Current state: compiles cleanly with `pdflatex main_AMLDS.tex` (no errors,
+no undefined references), output is **6 pages**.
 
 ### Step 2 — Address reviewer feedback
 The single reviewer gave **weak accept**, with these criticisms:
@@ -61,3 +61,8 @@ The single reviewer gave **weak accept**, with these criticisms:
 ## Change log
 - *2026-05-11* — Repo initialized. `main_AMLDS.tex` created as a copy of
   `main.tex`. Working copy and reviewer-response plan recorded here.
+- *2026-05-11* — `main_AMLDS.tex` cleaned up: removed dup bibliography tail,
+  unused algorithm packages, anonymous flag; added real author block.
+  Compiles cleanly to a 6-page PDF.
+- *2026-05-11* — Moved prior `main*.tex` variants and `acmart.cls` to `old/`
+  so only `main_AMLDS.tex` is the active source.
