@@ -154,7 +154,7 @@
     \begin{itemize}
       \item Flat (exact)
       \item IVF (\texttt{nlist}, \texttt{nprobe} sweep)
-      \item HNSW ($M{=}64$, \texttt{efC}/\texttt{efS})
+      \item HNSW ($M{=}16$, $\texttt{efC}{=}200$, \texttt{efS} sweep)
       \item BM25 (Pyserini)
     \end{itemize}
   \end{columns}
@@ -263,6 +263,46 @@
 \end{frame}
 
 %% =====================================================================
+\begin{frame}{The recall--latency trade-off changes shape}
+  \centering
+  \includegraphics[width=0.94\textwidth]{figures/pareto_recall_vs_latency.png}
+
+  \vspace{-0.4em}
+  {\footnotesize HNSW efSearch sweep (standard FAISS recipe $M{=}16$, $\textrm{efC}{=}200$) vs.\ Flat (red square). Red region = strictly Pareto-dominated by Flat.}
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{The cost-to-close ratio (corpus-invariant)}
+  \texttt{efSearch} needed to reach $95\%$ of Flat's Recall@10:
+  \vspace{0.3em}
+  \begin{center}
+    \small
+    \setlength{\tabcolsep}{6pt}
+    \begin{tabular}{lrrr}
+      \toprule
+      Subset & efS & ms/q & vs.\ Flat \\
+      \midrule
+      HD-standard & $100$    & $0.39$  & {\color{good}\textbf{2.7$\times$ faster}} \\
+      HD-rare     & $2{,}000$ & $6.94$  & $6.5\times$ slower \\
+      HD-{\color{accent}id}  & {\color{accent}\textbf{$8{,}000$}} & {\color{accent}$41.9$} & {\color{accent}\textbf{$40\times$ slower}} \\
+      \midrule
+      MM-standard & $1{,}000$ & $3.48$  & $2.1\times$ slower \\
+      MM-rare     & $16{,}000$ & $129.6$ & $79\times$ slower \\
+      MM-{\color{accent}id}  & {\color{accent}\textbf{$16{,}000$}} & {\color{accent}$132.0$} & {\color{accent}\textbf{$81\times$ slower}} \\
+      \bottomrule
+    \end{tabular}
+  \end{center}
+
+  \vspace{0.6em}
+  \begin{itemize}
+    \item Standard queries: HNSW gives the canonical ANN speedup.
+    \item ID queries: need \alert{$80$--$160\times$ more efSearch budget} than standard.
+    \item Search cost scales $\sim$linearly in efSearch $\Rightarrow$ this ratio
+          \emph{generalizes to any corpus size}.
+  \end{itemize}
+\end{frame}
+
+%% =====================================================================
 \begin{frame}{``But this is only because the embeddings are simple''}
   Reviewer question we anticipated: \emph{do learned dense encoders avoid this?}
 
@@ -299,15 +339,15 @@
 
 %% =====================================================================
 \begin{frame}{What this means for production}
-  \begin{block}{Translation: lost user sessions}
-    Switch from exact to HNSW at fixed embedding quality, you forfeit:
+  \begin{block}{Two ways to read the gap}
     \begin{itemize}
-      \item $\sim 63\%$ of achievable recall on identifier queries,
-      \item $\sim 18\%$ on rare-term queries,
-      \item $\sim 2\%$ on standard queries.
+      \item \textbf{Default efSearch:} HNSW forfeits $\sim 63\%$ of achievable
+            recall on identifier queries, $\sim 18\%$ on rare, $\sim 2\%$ on standard.
+            \emph{Visible:} 71\% of HD-ID HNSW queries return nothing relevant.
+      \item \textbf{Match Flat recall:} on ID you must pay $40$--$80\times$ Flat
+            latency. ANN's speedup advantage \emph{evaporates} on the population
+            that needs reliability the most.
     \end{itemize}
-    Average-case recall reported with an ANN deployment substantially
-    \emph{overstates} worst-case service quality.
   \end{block}
 
   \medskip
@@ -317,7 +357,7 @@
     \item \emph{Index-aware training}: penalize placement of rare features in
           poorly-reachable embedding regions.
     \item \emph{Hybrid retrieval}: sparse for precision on rare tokens, dense for
-          semantic generalization. Not new advice---but now with a quantitative justification.
+          semantic generalization---now with a quantitative justification.
   \end{enumerate}
 \end{frame}
 
@@ -326,12 +366,14 @@
   \begin{enumerate}
     \item Representation capacity is \emph{necessary but not sufficient} for
           production dense retrieval.
-    \item ANN indices introduce a \emph{second}, structurally different failure mode
-          that concentrates on rare-token / identifier queries.
-    \item We formalized this as \textbf{indexing bias} and derived a
-          \textbf{centroid-dilution bound} that we then directly measured per query.
-    \item The Flat$\to$HNSW gap on identifier queries is $\sim 30\times$ larger
-          than on standard queries, in both retail and open-domain text.
+    \item ANN indices introduce a \emph{second}, structurally different failure
+          mode concentrated on rare-token / identifier queries.
+    \item We formalized this as \textbf{indexing bias} + \textbf{centroid-dilution
+          bound}, then directly measured the centroid signal per query
+          ($\sim 40\times$ collapse from standard to ID).
+    \item Reaching Flat-equivalent recall on ID requires $80$--$160\times$ more
+          \texttt{efSearch} budget than on standard---the corpus-invariant
+          quantification of the ANN value-proposition collapse.
     \item Supervised encoders don't escape this---they collapse at the
           representation stage on the same queries.
   \end{enumerate}
