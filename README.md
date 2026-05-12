@@ -110,6 +110,33 @@ The MS MARCO BM25 > dense result is now framed in the paper as a known represent
     both datasets symmetrically.
   - PDF back to 6 pages.
 
+## Step 2 final pass (2026-05-11) — Pareto + cuts
+
+Integrated the Pareto-latency analysis (the new headline) and applied
+the page-budget cuts proposed earlier:
+
+- New §4.6 "The ANN value proposition collapses on spear-fishing queries"
+  with `figures/pareto_recall_vs_latency.png` and the 95%-of-Flat-recall
+  table. Quantifies: on standard queries HNSW efS=100 is Pareto-optimal;
+  on ID queries every HNSW setting is Pareto-dominated by Flat, requiring
+  efS=4000 to reach 95% of Flat recall at 19× the latency.
+- New §4.7 "Supervised encoders: confirmation of the methodological
+  argument" — H result framed as confirmation of the §4.1 trigram-vs-DPR
+  argument, not a separate finding.
+- Compressed §4.3 (dimensionality on Flat) — kept the key sentence,
+  dropped fig:flat_dim_queries.
+- Compressed §4.5 (centroid measurement) — kept Table III + boxplot,
+  dropped cluster_rank_cdf figure.
+- Added bootstrap-CI footnote to Table II.
+- Rewrote Discussion as a single tight paragraph; cut Future Directions
+  from 5 hand-wavy bullets to 2 concrete ones.
+- Removed uncited `dasgupta2003elementary` from bibliography; set
+  bibliography to `\footnotesize`.
+
+Result: 7 pages (6 of body + 1 of references). The body fits the
+typical IEEE conf 6-page limit; references spill to page 7, which is
+standard practice for IEEE proceedings.
+
 ## Still on the longer list (run as a second loop)
 
 - **A** ✅ DONE (2026-05-11) — Direct centroid-dilution measurement.

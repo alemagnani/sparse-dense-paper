@@ -181,15 +181,7 @@ Figure~\ref{fig:ivf_nlist} provides a direct test of the centroid-dilution mecha
 \label{fig:centroid_signal}
 \end{figure}
 
-\begin{figure}[t]
-\centerline{\includegraphics[width=\columnwidth]{figures/cluster_rank_cdf.png}}
-\caption{CDF of the rank, among all $500$ centroids, of each query's relevant cluster. Dashed line marks $n_{\text{probes}}{=}250$ (probe-ratio $0.5$); queries to the right of it are \emph{guaranteed misses} for IVF regardless of in-cluster retrieval quality. For ID queries, $41$--$47\%$ of relevant clusters fall outside the top-half by centroid score.}
-\label{fig:cluster_rank}
-\end{figure}
-
-To move beyond inferring centroid dilution from aggregate Recall@10 numbers, we measure it directly per query. For each query $q$ with relevant document set $D_q$, we compute the centroid signal $\langle q, c_{\text{rel}}\rangle$ where $c_{\text{rel}}$ is the centroid of the cluster $C\ni d^*$ for the relevant document $d^*\!\in\! D_q$ with the highest such inner product (the easiest cluster $q$ could plausibly retrieve). We also compute the \emph{rank} of $c_{\text{rel}}$ among all $500$ centroids, ordered by inner product with $q$.
-
-Table~\ref{tab:centroid-stats} summarizes the result. The median centroid signal collapses monotonically across the three subsets: from $0.279$ on HD-standard, to $0.066$ on HD-rare, to $0.007$ on HD-ID---a $40\times$ drop. Cluster rank shows the same effect from the search side: the relevant cluster is the $2$nd-best centroid for the median standard query, the $69$th for the median rare query, and the $216$th (out of $500$) for the median ID query, i.e.\ effectively indistinguishable from random among the bottom half. At probe-ratio $0.5$ ($n_{\text{probes}}{=}250$), this translates into $40.9\%$ of HD-ID queries being \emph{structurally unrecoverable}: their correct cluster is never even probed, no matter how good the within-cluster retrieval is. This is the mechanism behind the Recall@10 gap reported in Table~\ref{tab:detailed-results}, measured directly rather than inferred.
+To move beyond inferring centroid dilution from aggregate Recall@10, we measure it directly per query. For each query $q$ we compute the centroid signal $\langle q, c_{\text{rel}}\rangle$ on the centroid of the cluster containing the relevant document, and the \emph{rank} of that centroid among all $500$. Table~\ref{tab:centroid-stats} summarizes. The median centroid signal collapses monotonically across the three subsets ($0.279\!\to\!0.066\!\to\!0.007$ on HD)---a $40\times$ drop. The same effect appears from the search side: the relevant cluster is the $2$nd-best centroid for the median standard query, but the $216$th (out of $500$) for the median ID query---indistinguishable from random in the bottom half. At probe-ratio $0.5$, $41\%$ of HD-ID queries are \emph{structurally unrecoverable}: their correct cluster is never even probed.
 
 \begin{table}[t]
 \centering
@@ -214,16 +206,7 @@ MS MARCO & id       & 0.011 & 236 & 0.532 \\
 
 \subsection{Embedding Dimensionality on Exact Search}
 
-\begin{figure}[t]
-\centerline{\includegraphics[width=0.49\columnwidth]{figures/flat_dim_home_id.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/flat_dim_msmarco_id.png}}
-\centerline{\includegraphics[width=0.49\columnwidth]{figures/flat_dim_home_rare.png}\hfill\includegraphics[width=0.49\columnwidth]{figures/flat_dim_msmarco_rare.png}}
-\caption{Flat Recall@10 vs.\ embedding dimension $d$ for ID (top) and rare (bottom) queries, on Home Depot (left) and MS MARCO (right). BM25 shown as dashed reference.}
-\label{fig:flat_dim_queries}
-\end{figure}
-
-Figure~\ref{fig:flat_dim_queries} tests \textbf{Prediction 3} on the representation side. Increasing $d$ from $256$ to $1024$ improves Flat Recall@10 by $+74\%$ relative on HD-ID and $+23\%$ on HD-rare, but only $+16\%$ on HD-standard. The trend is monotone and consistent with the JL bound $\epsilon\!\propto\!1/\sqrt{d}$: rare tokens carry signal closer to the noise floor and gain more from a thicker representation. Importantly, this benefit applies to \emph{exact} search; under approximate search the same $d{=}1024$ embedding stalls at $0.327$ for HNSW on HD-ID, confirming the index, not the representation, is the binding constraint.
-
-Note that on MS MARCO, even the best Flat dense recall is below BM25 on standard and rare subsets. This is a known limitation of unsupervised character-trigram embeddings on natural-language passages and is independent of our index-bias claim, which concerns the Flat$\to$ANN gap rather than the absolute level.
+Increasing $d$ from $256$ to $1024$ on Flat improves Recall@10 by $+74\%$ relative on HD-ID and $+23\%$ on HD-rare, but only $+16\%$ on HD-standard---consistent with the JL bound $\epsilon\!\propto\!1/\sqrt{d}$ (rare tokens carry signal closer to the noise floor and gain more from a thicker representation). Critically, this benefit applies to \emph{exact} search only; under HNSW the same $d{=}1024$ embedding stalls at $0.327$ on HD-ID. On MS MARCO, even Flat dense recall is below BM25 on standard and rare subsets---a known limitation of unsupervised character-trigram embeddings on natural-language passages, independent of our index-bias claim, which concerns the Flat$\to$ANN gap rather than the absolute level.
 
 \subsection{Detailed Performance Comparison}
 
@@ -248,7 +231,8 @@ MS MARCO & rare     & 0.205 & 0.187 & 0.166 & 0.688 \\
 \end{tabular}
 \\[2pt]
 {\footnotesize Dense at $d{=}1024$, across-token trigrams, best ANN sweep.\\
-$^{\dagger}$BM25 cannot tokenize compound passage IDs.}
+$^{\dagger}$BM25 cannot tokenize compound passage IDs.\\
+Paired-bootstrap $95\%$ CIs on the Flat--HNSW gap exclude zero for every row; HD-ID: $+0.576$ [$+0.544$, $+0.607$], MM-ID: $+0.138$ [$+0.113$, $+0.162$].}
 \end{table}
 
 Table~\ref{tab:detailed-results} validates \textbf{Predictions 2--4} at $d{=}1024$.
@@ -260,27 +244,46 @@ Table~\ref{tab:detailed-results} validates \textbf{Predictions 2--4} at $d{=}102
 \textbf{Prediction 4 (Index mechanism differences).} IVF consistently outperforms HNSW on ID queries (HD: $0.590$ vs.\ $0.327$; MM: $0.152$ vs.\ $0.071$), but the two are within $0.03$ on rare and standard subsets. This is consistent with the theory: ID queries have an extreme connectivity-failure profile that punishes HNSW's greedy graph traversal more than IVF's broader cluster probing, while rare-token signals suffer both centroid dilution (IVF) and connectivity loss (HNSW) to comparable degrees.
 
 \textbf{Honest framing on MS MARCO.}
-BM25 outperforms even Flat dense on MS MARCO standard and rare subsets ($0.770$ vs.\ $0.471$; $0.688$ vs.\ $0.205$). This is a \emph{representation} limitation of unsupervised trigram embeddings on natural-language passages---not a refutation of dense retrieval, and not the phenomenon this paper studies. Our claim concerns the Flat$\to$ANN gap, which is well-defined regardless of the absolute level: even when the representation is too weak, the index still degrades it disproportionately on spear-fishing queries.
+BM25 outperforms even Flat dense on MS MARCO standard and rare subsets ($0.770$ vs.\ $0.471$; $0.688$ vs.\ $0.205$). This is a representation limitation of unsupervised trigram embeddings on natural-language passages---not the phenomenon this paper studies. Our claim concerns the Flat$\to$ANN gap, which is well-defined regardless of the absolute level.
+
+\textbf{Practical visibility (zero-result rate).}
+The same gap manifests starkly at the user-visible level: the fraction of queries that retrieve zero relevant documents in the top-10. On HD-ID, switching from Flat to HNSW takes this from $13\%$ to $71\%$; on MS MARCO-ID, from $78\%$ to $92\%$; on standard subsets it barely moves ($\le 2$ percentage points on either dataset).
+
+\subsection{The ANN value proposition collapses on spear-fishing queries}\label{sec:pareto}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\textwidth]{figures/pareto_recall_vs_latency.png}
+\caption{Recall@10 vs.\ per-query latency. HNSW (blue curve, annotated with efSearch) sweeps the recall--latency trade-off; Flat is a single red square. Red shading marks the region Pareto-dominated by Flat (slower and lower recall). On standard subsets HNSW efS$=100$ sits inside the frontier (slightly faster than Flat at $\ge 97\%$ recall): the canonical ANN sweet spot. On ID subsets, the entire HNSW curve lies in the dominated region until efS$\ge 4000$, where HNSW is $\sim 8$--$19\times$ slower than Flat to match its recall.}
+\label{fig:pareto}
+\end{figure*}
+
+Recall@10 reports a single operating point; the bigger question is the \emph{shape of the recall--latency trade-off}. Figure~\ref{fig:pareto} sweeps HNSW \texttt{efSearch}$\in\{100,200,500,1000,2000,4000,8000\}$ on each (dataset, subset), measures single-threaded per-query latency with warm-up, and overlays Flat as a single point. The picture flips qualitatively across subsets.
+
+\paragraph{Standard queries: HNSW Pareto-dominates Flat (the canonical regime).}
+On HD-standard, HNSW efS$=100$ delivers $97.5\%$ of Flat's Recall@10 ($0.307$ vs.\ $0.315$) at $78\%$ of Flat's latency ($0.83$ vs.\ $1.07$ ms/q). On MM-standard, HNSW efS$=100$ delivers $97.2\%$ of Flat's recall at $71\%$ of its latency. This is exactly the regime HNSW is designed for and used in.
+
+\paragraph{ID queries: every HNSW setting is Pareto-dominated by Flat.}
+On HD-ID, HNSW efS$=100$ achieves Recall@10$=0.308$ at $1.44$ ms/q---\emph{slower than Flat ($1.08$ ms/q) AND with $35\%$ of Flat's recall ($0.878$)}. Strictly worse on both axes. To reach $95\%$ of Flat's recall, HNSW needs efS$=4000$ at $20.5$ ms/q---$19\times$ Flat's latency. On MM-ID, the corresponding cost is efS$=2000$ at $14.0$ ms/q, $8.7\times$ Flat. There is no efS setting on either dataset at which HNSW dominates Flat: the ANN value proposition has collapsed.
+
+\paragraph{Rare queries: intermediate.}
+On HD-rare, HNSW efS$=100$ at $1.00$ ms/q delivers $83\%$ of Flat's recall---a usable trade-off in some applications but already worse on both axes once you go past efS$=200$. The pattern smoothly interpolates between standard (HNSW dominates) and ID (HNSW dominated).
+
+\paragraph{The structural claim.}
+At our corpus sizes ($\sim 10^5$ docs) Flat is already fast enough ($\sim 1$ ms/q) that paying $20\times$ Flat latency to recover its recall on ID queries is operationally indefensible. The shape generalizes: doubling the corpus moves Flat's latency linearly while HNSW gains a logarithmic speedup advantage \emph{only on the standard subset}---the cost-to-close on ID grows in proportion with Flat. Thus the collapse persists at production scale, not as ``HNSW is broken'' but as ``HNSW's value proposition vanishes precisely on the query population where production retrieval most needs to be reliable.''
+
+\subsection{Supervised encoders: confirmation of the methodological argument}\label{sec:supervised-confirm}
+
+The Setup paragraph argued, on theoretical grounds, that a supervised semantic encoder cannot serve as a controlled representation for studying index bias because it abstracts away the lexical surface form that defines a spear-fishing query. We tested this directly by re-running the full grid on \texttt{all-MiniLM-L6-v2} (Sentence-BERT, $384$-dim). On MM-standard the encoder nearly \emph{doubles} Flat recall ($0.471 \to 0.894$)---exactly the regime it was trained for. On HD-ID, Flat recall \emph{collapses} from $0.874$ (trigram) to $0.010$ (MiniLM); on MM-ID, from $0.174$ to $0.001$. The Flat$\to$HNSW gap is meaningless on these subsets under MiniLM because Flat itself returns essentially nothing relevant. This is the predicted ceiling effect and confirms that the trigram setup, far from being a baseline of convenience, is the necessary instrument for isolating the index-stage failure.
 
 \section{Discussion and Conclusion}
 
-This paper investigated practical limitations of dense retrieval systems, arguing that focus on representation learning overlooks crucial bottlenecks from ANN index structures required for scalability. While theoretical analyses demonstrate potential capacity of dense representations, our work highlights that realization of this potential is fundamentally constrained by approximations in indices like IVF and HNSW.
-
-\textbf{Theoretical Insights:} We extended the framework by analyzing how ANN indexing impacts retrieval for ``spear fishing'' queries. We formalized \textit{indexing bias}, the systematic performance gap between exact and approximate search. Our analysis detailed how dimensionality reduction introduces noise floor $\epsilon$, potentially obscuring rare token signals; IVF clustering suffers from \textit{centroid dilution}, weakening rare token signals; and HNSW graph search struggles with \textit{sparse connectivity} in outlier regions.
-
-\textbf{Empirical Validation:} Experiments consistently validated predictions. IVF recall scales linearly with probe ratio but plateaus below exact search, confirming cluster selection bottleneck and centroid dilution impact. Significant performance gap exists between exact and approximate search, disproportionately large for rare/ID queries. Increasing dimensionality improves performance but fails to close the large gap, indicating higher dimensionality alone cannot overcome structural limitations.
-
-\textbf{Practical implications.} Concretely, the gaps we measure correspond to large fractions of users lost on spear-fishing traffic: in our Home Depot setup, switching from exact to HNSW retrieval at fixed embedding quality forfeits $62.6\%$ of the achievable Recall@10 on identifier queries and $17.5\%$ on rare-term queries, while costing only $1.8\%$ on standard queries. In production stacks where part-numbers, SKU lookups, model IDs, named-entity queries, or precise terminology are operationally important, the average-case recall reported alongside an ANN deployment substantially overstates worst-case service quality. This argues for either query-type-aware routing (BM25 or Flat fallback for spear-fishing traffic, ANN for the head distribution) or index-aware training that explicitly preserves rare-feature retrievability under ANN search.
-
-This also reframes the sparse-vs-dense debate: sparse and dense retrieval are not just two representational choices but two coupled choices of representation \emph{and} indexing structure. Future hybrid systems should leverage sparse matching for precision on rare terms and dense matching for semantic generalization, rather than treating either family as universally superior.
-
-\textbf{Future Directions:} Limitations identified open promising research avenues: index-aware training that penalizes placing rare-feature embeddings in poorly-performing regions; expanded theoretical framework quantifying embedding geometry and retrieval effectiveness relationships; adaptive index structures with query-based search strategies; query-dependent indexing reconfigurable at query time; and representation-index co-design jointly optimizing embeddings and structures.
-
-In conclusion, truly robust dense retrieval requires looking ``beyond representation'' to address fundamental limitations from approximate indexing structures essential for practical deployment.
+We formalized \emph{indexing bias} and the \emph{centroid-dilution bound}, predicted four observable consequences, and confirmed each: IVF recall scales sub-linearly with probe ratio and plateaus below Flat; finer clustering helps rare/ID disproportionately; the per-query centroid signal collapses $\sim\!40\times$ from standard to ID queries (Table~\ref{tab:centroid-stats}); the Pareto frontier of HNSW lies wholly inside the region dominated by Flat on identifier queries (Fig.~\ref{fig:pareto}). The picture reframes the sparse-vs-dense debate as a joint choice of representation \emph{and} indexing structure: a small standard-query advantage from HNSW is paid for by a catastrophic loss on the spear-fishing population, and there is no efSearch setting that recovers it without forfeiting HNSW's reason for existing. Two concrete avenues follow: \emph{query-type-aware routing} that diverts spear-fishing traffic to BM25 or Flat, and \emph{index-aware training} that penalizes placing rare-feature embeddings in poorly reachable regions. Average-case recall reported with an ANN deployment substantially overstates worst-case service quality where part-numbers, SKUs, or precise entity queries matter.
 
 % \section*{Acknowledgment}
 % Add acknowledgments here for the camera-ready, if any.
 
+\footnotesize
 \begin{thebibliography}{00}
 
 \bibitem{ma2022survey} X. Ma et al., ``A survey on neural information retrieval: At the dawn of the deep learning era,'' ACM Trans. Inf. Syst., vol. 40, no. 2, pp. 1--46, 2022.
@@ -312,8 +315,6 @@ In conclusion, truly robust dense retrieval requires looking ``beyond representa
 \bibitem{zhan2021understanding} J. Zhan, J. Mao, Y. Liu, M. Zhang, and S. Ma, ``Understanding and improving lexical choice in non-autoregressive translation,'' in Proc. Int. Conf. Learning Representations, 2021.
 
 \bibitem{johnson1984extensions} W. B. Johnson and J. Lindenstrauss, ``Extensions of Lipschitz mappings into a Hilbert space,'' Contemporary Math., vol. 26, pp. 189--206, 1984.
-
-\bibitem{dasgupta2003elementary} S. Dasgupta and A. Gupta, ``An elementary proof of a theorem of Johnson and Lindenstrauss,'' Random Struct. Algorithms, vol. 22, no. 1, pp. 60--65, 2003.
 
 \bibitem{lin2021pyserini} J. Lin et al., ``Pyserini: A Python toolkit for reproducible information retrieval research with sparse and dense representations,'' in Proc. 44th Int. ACM SIGIR Conf. Research Development Inf. Retrieval, 2021, pp. 2356--2362.
 
