@@ -254,26 +254,36 @@ The same gap manifests starkly at the user-visible level: the fraction of querie
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.95\textwidth]{figures/pareto_recall_vs_latency.png}
-\caption{Recall@10 vs.\ per-query latency (log-x), single-threaded with warm-up. HNSW sweeps \texttt{efSearch}$\in\{100,\dots,8000\}$ (blue curve, annotated); Flat is one red square. Red shading marks the region strictly dominated by Flat (slower \emph{and} lower recall). Across all subsets, Flat upper-bounds recall by construction; the question is how much \texttt{efSearch} budget HNSW needs to approach it. On standard subsets a few hundred suffice. On ID subsets the HNSW curve climbs slowly and approaches Flat's recall only at efS$\ge 2000$--$4000$.}
+\caption{Recall@10 vs.\ per-query latency (log-x), single-threaded with warm-up; HNSW configured with the standard FAISS recipe $M{=}16$, $\mathrm{efC}{=}200$, sweeping $\mathrm{efSearch}\in\{50,\dots,16000\}$ (blue curve, annotated). Flat is one red square. Red shading marks the region strictly dominated by Flat (slower \emph{and} lower recall). Flat upper-bounds recall by construction. On standard subsets HNSW at $\mathrm{efS}{=}50$--$100$ is $2$--$5\times$ faster than Flat at $\ge 92\%$ of Flat's recall---the canonical ANN sweet spot. On ID subsets the HNSW curve climbs slowly: HD-ID requires $\mathrm{efS}{=}8000$ ($40\times$ Flat's latency) to reach $95\%$ of Flat's recall; MM-ID needs $\mathrm{efS}{=}16000$ ($81\times$).}
 \label{fig:pareto}
 \end{figure*}
 
-The Recall@10 numbers in Table~\ref{tab:detailed-results} report HNSW at the FAISS default \texttt{efSearch}$=100$. The complete picture requires sweeping \texttt{efSearch} and measuring the latency cost of approaching Flat. Fig.~\ref{fig:pareto} does this for each (dataset, subset). The HNSW curve has a qualitatively different shape on standard vs.\ spear-fishing subsets.
+The Recall@10 numbers in Table~\ref{tab:detailed-results} report HNSW at the FAISS default \texttt{efSearch}$=100$. The complete picture requires sweeping \texttt{efSearch} and measuring the latency cost of approaching Flat. Fig.~\ref{fig:pareto} does this for each (dataset, subset) with the standard HNSW recipe $M{=}16$, $\mathrm{efC}{=}200$. The HNSW curve has a qualitatively different shape on standard vs.\ spear-fishing subsets.
 
 \paragraph{Cost-to-close: the corpus-invariant signal.}
-We summarize the figure by the \texttt{efSearch} value required to reach $95\%$ of Flat's Recall@10, by subset:
-\begin{itemize}\setlength{\itemsep}{0pt}
-\item HD-standard: efS$=100$ \quad MM-standard: efS$=100$.
-\item HD-rare: efS$=500$ \quad MM-rare: efS$=2000$.
-\item HD-ID: efS$=\mathbf{4000}$ \quad MM-ID: efS$=\mathbf{2000}$.
-\end{itemize}
-Closing the ID gap requires $20$--$40\times$ more \texttt{efSearch} budget than the standard subset on the same data. Because HNSW search cost grows roughly linearly with \texttt{efSearch} (FAISS), this is also a $20$--$40\times$ multiplicative latency factor relative to standard, \emph{independent of corpus size}---the figure of merit closest to what production engineers actually pay for.
+We summarize the figure by the \texttt{efSearch} value required to reach $95\%$ of Flat's Recall@10, with the resulting latency relative to Flat:
+\begin{center}\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrr}
+\toprule
+Subset & efS for $95\%$ Flat & ms/q & vs.\ Flat \\
+\midrule
+HD-standard  & $100$    & $0.39$  & $2.7\times$ \emph{faster} \\
+HD-rare      & $2{,}000$ & $6.94$  & $6.5\times$ slower \\
+HD-ID        & $\mathbf{8{,}000}$ & $\mathbf{41.9}$ & $\mathbf{40\times}$ slower \\
+MM-standard  & $1{,}000$ & $3.48$  & $2.1\times$ slower \\
+MM-rare      & $16{,}000$ & $129.6$ & $79\times$ slower \\
+MM-ID        & $\mathbf{16{,}000}$ & $\mathbf{132.0}$ & $\mathbf{81\times}$ slower \\
+\bottomrule
+\end{tabular}
+\end{center}
+Closing the ID gap to $95\%$ of Flat recall requires $80$--$160\times$ more \texttt{efSearch} budget than the standard subset on the same data---an $40$--$80\times$ multiplicative latency factor at our corpus sizes. The corpus-invariant signal is the \texttt{efSearch} ratio itself: ANN search cost grows roughly linearly with \texttt{efSearch}, so this multiplier carries through any scale of deployment.
 
-\paragraph{Latency comparison at our scale.}
-On HD-ID, reaching $95\%$ of Flat's recall requires HNSW efS$=4000$ at $20.5$ ms/q vs.\ Flat's $1.08$ ms/q---$19\times$ Flat's latency. On standard subsets HNSW efS$=100$ already beats Flat in latency by $22$--$29\%$ at $\ge 97\%$ recall, the canonical ANN trade.
+\paragraph{Standard queries: the canonical ANN sweet spot.}
+On HD-standard HNSW efS$=100$ delivers $96\%$ of Flat's recall at $0.39$ ms/q---$2.7\times$ faster than Flat's $1.07$ ms/q. On MM-standard the same operating point delivers $82\%$ recall at $0.39$ ms/q ($4.2\times$ faster). At efS$=50$, HD-standard achieves $4.7\times$ speedup at $92\%$ recall. This is exactly what HNSW is designed for and used in production.
 
 \paragraph{Corpus-size caveat.}
-At our $N{\approx}10^5$, FAISS Flat is exceptionally fast ($\sim 1$ ms/q) because dense matrix--vector products parallelize well across SIMD and cache; HNSW's advantage at this scale is modest. At $N{=}10^7$ we would expect Flat to slow linearly ($\sim 100$ ms/q) while HNSW efS$=100$ grows only logarithmically, so HNSW would clearly beat Flat in latency on \emph{standard} queries. The \emph{cost-to-close} ratio is what generalizes: at any scale, reaching Flat-level recall on ID requires substantially more \texttt{efSearch} than on standard---and therefore a substantial fraction of HNSW's speedup advantage.
+At our $N{\approx}10^5$, FAISS Flat is fast ($\sim 1$--$1.6$ ms/q) because dense matrix--vector products parallelize well across SIMD; HNSW's logarithmic-speedup advantage is modest. At $N{=}10^7$ Flat would slow linearly (${\sim}100$ ms/q) while HNSW efS$=100$ grows logarithmically, so HNSW would clearly beat Flat in latency on \emph{standard} queries. The \emph{cost-to-close ratio} is what generalizes: at any scale, reaching Flat-level recall on ID requires $80$--$160\times$ the \texttt{efSearch} budget of standard, and therefore consumes a substantial fraction of HNSW's speedup advantage.
 
 \subsection{Supervised encoders: confirmation of the methodological argument}\label{sec:supervised-confirm}
 
@@ -281,7 +291,7 @@ The Setup paragraph argued, on theoretical grounds, that a supervised semantic e
 
 \section{Discussion and Conclusion}
 
-We formalized \emph{indexing bias} and the \emph{centroid-dilution bound}, predicted four observable consequences, and confirmed each: IVF recall scales sub-linearly with probe ratio and plateaus below Flat; finer clustering helps rare/ID disproportionately; the per-query centroid signal collapses $\sim\!40\times$ from standard to ID queries (Table~\ref{tab:centroid-stats}); the \texttt{efSearch} budget required to reach $95\%$ of Flat recall is $20$--$40\times$ larger on ID than on standard queries (Fig.~\ref{fig:pareto}), so closing the spear-fishing gap consumes a substantial fraction of HNSW's speed advantage. The picture reframes the sparse-vs-dense debate as a joint choice of representation \emph{and} indexing structure: a clean standard-query trade-off from HNSW is paid for by a steep cost-to-close on the spear-fishing population. Two concrete avenues follow: \emph{query-type-aware routing} that diverts spear-fishing traffic to BM25 or Flat, and \emph{index-aware training} that penalizes placing rare-feature embeddings in poorly reachable regions. Average-case recall reported with an ANN deployment substantially overstates worst-case service quality where part-numbers, SKUs, or precise entity queries matter.
+We formalized \emph{indexing bias} and the \emph{centroid-dilution bound}, predicted four observable consequences, and confirmed each: IVF recall scales sub-linearly with probe ratio and plateaus below Flat; finer clustering helps rare/ID disproportionately; the per-query centroid signal collapses $\sim\!40\times$ from standard to ID queries (Table~\ref{tab:centroid-stats}); the \texttt{efSearch} budget required to reach $95\%$ of Flat recall is $80$--$160\times$ larger on ID than on standard queries (Fig.~\ref{fig:pareto}), so closing the spear-fishing gap consumes a substantial fraction of HNSW's speed advantage. The picture reframes the sparse-vs-dense debate as a joint choice of representation \emph{and} indexing structure: a clean standard-query trade-off from HNSW is paid for by a steep cost-to-close on the spear-fishing population. Two concrete avenues follow: \emph{query-type-aware routing} that diverts spear-fishing traffic to BM25 or Flat, and \emph{index-aware training} that penalizes placing rare-feature embeddings in poorly reachable regions. Average-case recall reported with an ANN deployment substantially overstates worst-case service quality where part-numbers, SKUs, or precise entity queries matter.
 
 % \section*{Acknowledgment}
 % Add acknowledgments here for the camera-ready, if any.
