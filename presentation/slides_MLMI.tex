@@ -1,0 +1,50 @@
+%% MLMI 2026 variant of the presentation.
+%% Compile with: pdflatex slides_MLMI.tex  (twice for frame numbers)
+
+\documentclass[10pt,aspectratio=169]{beamer}
+
+\usetheme{default}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamerfont{frametitle}{size=\large,series=\bfseries}
+\setbeamerfont{title}{size=\Large,series=\bfseries}
+
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{tikz}
+
+\definecolor{accent}{HTML}{C44E52}
+\definecolor{good}{HTML}{4C7AB0}
+
+%% ---- Conference-specific ----
+\newcommand{\confname}{MLMI 2026}
+\newcommand{\conflong}{9th Int.\ Conf.\ on Machine Learning and Machine Intelligence}
+\newcommand{\confvenue}{Tokyo, Japan}
+\newcommand{\confdate}{July 19, 2026}
+\newcommand{\confpaperid}{Paper EL0079-A}
+%% -----------------------------
+
+%% Custom footline: conference on the left, paper ID + frame number on the right.
+\setbeamertemplate{footline}{%
+  \leavevmode%
+  \hbox{%
+    \begin{beamercolorbox}[wd=.6\paperwidth,ht=2.4ex,dp=1ex,leftskip=1em]{author in head/foot}%
+      \usebeamerfont{author in head/foot}\confname\ \textbar\ \confvenue\ \textbar\ \confdate%
+    \end{beamercolorbox}%
+    \begin{beamercolorbox}[wd=.4\paperwidth,ht=2.4ex,dp=1ex,rightskip=1em]{author in head/foot}%
+      \usebeamerfont{author in head/foot}\hfill\confpaperid\ \textbar\ \insertframenumber%
+    \end{beamercolorbox}%
+  }%
+  \vskip0pt%
+}
+
+\title{Beyond Representation:\\ Index Structure Limitations in Dense Retrieval}
+\author{Alessandro Magnani}
+\institute{\conflong\\ \confname\ \textbar\ \confvenue}
+\date{\confdate}
+
+\begin{document}
+\input{slides_body}
+\end{document}

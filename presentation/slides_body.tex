@@ -1,27 +1,8 @@
-\documentclass[10pt,aspectratio=169]{beamer}
-
-\usetheme{default}
-\usecolortheme{seahorse}
-\setbeamertemplate{navigation symbols}{}
-\setbeamertemplate{footline}[frame number]
-\setbeamerfont{frametitle}{size=\large,series=\bfseries}
-\setbeamerfont{title}{size=\Large,series=\bfseries}
-
-\usepackage{graphicx}
-\usepackage{amsmath,amssymb}
-\usepackage{booktabs}
-\usepackage{xcolor}
-\usepackage{tikz}
-
-\definecolor{accent}{HTML}{C44E52}
-\definecolor{good}{HTML}{4C7AB0}
-
-\title{Beyond Representation:\\ Index Structure Limitations in Dense Retrieval}
-\author{Alessandro Magnani}
-\institute{AMLDS 2026 \;\textbar\; Osaka, Japan}
-\date{July 2026}
-
-\begin{document}
+%% Shared slide body. Include from slides_MLMI.tex or slides_AMLDS.tex.
+%% Expects the following macros to be defined by the wrapper before \input:
+%%   \confname   e.g. "MLMI 2026"
+%%   \confvenue  e.g. "Tokyo, Japan"
+%%   \confdate   e.g. "July 19, 2026"
 
 %% =====================================================================
 \begin{frame}[plain]
@@ -189,13 +170,17 @@
     {\footnotesize Recall@10 at $d{=}1024$, across-token trigrams, best ANN sweep config.}
   \end{center}
 
-  \vspace{0.5em}
+  \vspace{0.3em}
+  \footnotesize
   \begin{itemize}
     \item Flat$\to$HNSW gap (relative):\;
-          standard $\approx$ \textbf{2\%}\quad rare $\approx$ \textbf{18\%}\quad
-          \alert{id $\approx 63\%$}.
-    \item Same monotone pattern on both datasets.
-    \item All gaps statistically significant (paired bootstrap $95\%$ CI excludes zero).
+          HD \{standard \textbf{1.8\%}, rare \textbf{17.5\%}, \alert{id \textbf{62.6\%}}\};\;
+          MM \{standard \textbf{5.3\%}, rare \textbf{19.0\%}, \alert{id \textbf{59.2\%}}\}.
+    \item Paired-bootstrap $95\%$ CI on Flat$-$HNSW excludes zero everywhere
+          (HD-ID $+0.576$, MM-ID $+0.138$).
+    \item \emph{MS MARCO caveat:} BM25 $>$ Flat dense on standard/rare reflects a
+          representation limit of unsupervised trigrams---our claim is the
+          Flat$\to$ANN \emph{gap}, well-defined at any absolute level.
   \end{itemize}
 \end{frame}
 
@@ -215,7 +200,7 @@
     $n_{\text{list}}{=}200 \to 1000$.
 
     \medskip
-    Asymmetric improvement is exactly what Eq. (8) predicts.
+    Asymmetric improvement is exactly what the centroid-dilution bound (Eq.~1) predicts.
   \end{columns}
 \end{frame}
 
@@ -244,7 +229,7 @@
 
     \medskip
     \alert{$\sim 40\times$ collapse} from standard to ID:\\
-    centroid signal disappears into the JL noise floor exactly as Eq.~(8) predicts.\\[0.3em]
+    centroid signal disappears into the JL noise floor exactly as the bound (Eq.~1) predicts.\\[0.3em]
     For HD-ID queries, $41\%$ of relevant clusters fall outside the top-half by centroid
     score---\emph{structurally unrecoverable}.
   \end{columns}
@@ -255,9 +240,9 @@
   \includegraphics[width=\textwidth]{figures/D_zero_rate.png}
 
   \begin{itemize}
-    \item HD-id Flat: \textbf{13\%} of queries return nothing relevant in top-10.
-    \item HD-id \alert{HNSW: \textbf{71\%}}.
-    \item Standard subset: barely moves.
+    \item HD-id Flat \textbf{13\%} $\to$ HNSW \alert{\textbf{71\%}} return nothing relevant in top-10.
+    \item MM-id Flat \textbf{78\%} $\to$ HNSW \alert{\textbf{92\%}}.
+    \item Standard subsets: $\le 2$ percentage points either way on both datasets.
     \item \emph{This is the production-visible symptom.}
   \end{itemize}
 \end{frame}
@@ -265,10 +250,10 @@
 %% =====================================================================
 \begin{frame}{The recall--latency trade-off changes shape}
   \centering
-  \includegraphics[width=0.94\textwidth]{figures/pareto_recall_vs_latency.png}
+  \includegraphics[width=0.88\textwidth]{figures/pareto_recall_vs_latency.png}
 
-  \vspace{-0.4em}
-  {\footnotesize HNSW efSearch sweep (standard FAISS recipe $M{=}16$, $\textrm{efC}{=}200$) vs.\ Flat (red square). Red region = strictly Pareto-dominated by Flat.}
+  \vspace{-0.6em}
+  {\scriptsize HNSW efSearch sweep (standard FAISS recipe $M{=}16$, $\textrm{efC}{=}200$) vs.\ Flat (red square). Red region = strictly Pareto-dominated by Flat.}
 \end{frame}
 
 %% =====================================================================
@@ -393,8 +378,6 @@
     {\large Questions?}\\[2em]
 
     \small Alessandro Magnani \;\textbar\; \texttt{ale.magnani@gmail.com}\\
-    AMLDS 2026 \;\textbar\; Osaka, July 2026
+    \confname \;\textbar\; \confvenue \;\textbar\; \confdate
   \end{center}
 \end{frame}
-
-\end{document}
