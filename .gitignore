@@ -22,3 +22,7 @@
 # Local downloaded template archive
 amlds_template/template.zip
 dense_sparse_limitation.zip
+
+# PII: registration / personal forms (never commit)
+registration_form*.docx
+registration_form*.pdf
