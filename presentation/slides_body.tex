@@ -10,147 +10,211 @@
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{Why this talk}
+\begin{frame}{Why this talk: can we drop the sparse side?}
+  \textbf{Production retrieval today is \alert{hybrid}}: a dense embedding index
+  (HNSW / IVF) \emph{plus} an inverted index (BM25). Two stores, two scoring
+  paths, extra ops.
+
+  \medskip
+  \textbf{The tempting question}: could a pure-dense stack replace hybrid?
+  Simpler, one index, one score.
+
+  \medskip
+  Two things have to hold:
   \begin{itemize}
-    \item Dense retrieval is everywhere: e-commerce, enterprise search, RAG.
-    \item Practical deployments rely on \textbf{approximate nearest-neighbor (ANN)} indices
-          (HNSW, IVF) for speed.
-    \item Most research focuses on the \emph{representation}---can the embedding
-          capture the right semantics?
-    \item This talk: \alert{the index itself imposes a separate, quantifiable failure mode}
-          that disproportionately attacks a specific population of queries.
+    \item \textbf{Bottleneck 1 --- representation.}
+          Can the embedding \emph{encode} what BM25 encodes?
+          Well-studied: Tay et al.\ 2020, Fan et al.\ 2022 --- capacity grows with $d$.
+    \item \textbf{Bottleneck 2 --- indexing.}
+          Even if the embedding is capable, can an \emph{ANN index} still find it?
+          \alert{This talk. Largely unstudied.}
   \end{itemize}
 
   \vspace{0.5em}
-  \begin{block}{Headline finding}
-    Even when the embedding has enough representational capacity, switching from
-    exact (Flat) to HNSW search forfeits \textbf{$\sim 63\%$ of achievable Recall@10}
-    on identifier queries---vs.\ less than $2\%$ on standard queries.
+  \begin{block}{Headline}
+    Switching Flat $\to$ HNSW forfeits \textbf{$\sim 63\%$} of achievable Recall@10
+    on identifier queries---and less than $2\%$ on standard queries.
+    Same embedding. The index alone.
   \end{block}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{The two camps}
-  \begin{columns}[T]
-    \column{0.5\textwidth}
-    \textbf{Sparse retrieval (BM25)}
-    \begin{itemize}
-      \item Inverted index over tokens.
-      \item Exact lexical matching.
-      \item Strong on rare terms, IDs, named entities.
-    \end{itemize}
-
-    \column{0.5\textwidth}
-    \textbf{Dense retrieval}
-    \begin{itemize}
-      \item Continuous embedding + nearest-neighbor search.
-      \item Strong semantic generalization.
-      \item Indispensable in production for fluency \& multilinguality.
-    \end{itemize}
-  \end{columns}
-
-  \vspace{1em}
-  \begin{itemize}
-    \item Prior theory (Tay et al.\ 2020; Fan et al.\ 2022):
-          \emph{representation capacity} of dense models can match sparse---given
-          enough dimensions.
-    \item But: practical dense retrieval uses ANN, not exact search.\\
-          \alert{What does that cost?}
-  \end{itemize}
-\end{frame}
-
-%% =====================================================================
-\begin{frame}{``Spear-fishing'' queries}
-  \begin{block}{Definition (operational)}
+\begin{frame}{The population that pays the bill: ``spear-fishing'' queries}
+  \begin{block}{Working definition}
     Queries whose relevance hinges on a single, low-frequency, high-IDF token:
     identifiers (SKUs, part numbers), rare terms, precise named entities.
   \end{block}
 
   \begin{itemize}
-    \item In production: a small fraction of total traffic.
-    \item But operationally critical: failures yield empty search-result pages,
-          abandoned carts, broken RAG retrievals.
-    \item In our experiments:
-      \begin{itemize}
-        \item \textbf{ID subset}: doc identifier used as query (extreme case).
-        \item \textbf{Rare subset}: uni/bigram terms appearing in $\le 5$ docs.
-        \item \textbf{Standard subset}: real user queries (control).
-      \end{itemize}
+    \item Small fraction of traffic, but operationally critical:
+          failed spear-fishing $\Rightarrow$ empty result pages, abandoned carts,
+          broken RAG lookups.
+    \item BM25 handles them trivially (exact token match).
+    \item If pure dense is going to replace hybrid, it has to hold up \emph{here}.
+    \item Our three query subsets: \textbf{standard} (control),
+          \textbf{rare} ($\le 5$ docs), \textbf{ID} (extreme case: doc identifier
+          as query).
   \end{itemize}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{The mechanism: centroid dilution (theory)}
-  IVF clusters the corpus into $N$ cells; at query time only the closest $n_{\text{probe}}$
-  centroids are searched.
+\begin{frame}{Quick primer: what is an IVF index?}
+  \textbf{IVF} (Inverted File) --- the standard partition-based ANN index.
+  \begin{enumerate}
+    \item Cluster the corpus into $N$ cells (k-means). Each cell has a
+          \emph{centroid} $c$.
+    \item At query time: score the query against all $N$ centroids;
+          keep the top $n_{\text{probe}}$.
+    \item Only search documents inside those $n_{\text{probe}}$ cells.
+  \end{enumerate}
 
-  \vspace{0.4em}
-  Centroid of cluster $C$:\quad
-  $c \;=\; \dfrac{1}{|C|}\sum_{d\in C} f(d) \;\;=\;\; \dots + \alpha_{t^*}\,p\,\phi(t^*) + \dots$
+  \begin{center}
+    \begin{tikzpicture}[scale=0.9]
+      \fill[good!15] (0.5,0.5) circle (0.9);
+      \fill[good!15] (3.0,1.2) circle (0.9);
+      \fill[accent!25] (5.5,0.6) circle (0.9);
+      \fill[good!15] (2.0,2.7) circle (0.9);
+      \foreach \x/\y in {0.4/0.4, 0.7/0.9, 0.3/0.7, 0.9/0.5,
+                         2.8/1.0, 3.1/1.4, 3.3/1.1, 2.9/1.6,
+                         5.3/0.5, 5.7/0.9, 5.6/0.4,
+                         1.8/2.5, 2.2/2.9, 2.0/2.5}
+        \fill[gray!70] (\x,\y) circle (0.04);
+      \fill[good] (0.5,0.5) circle (0.09);
+      \fill[good] (3.0,1.2) circle (0.09);
+      \fill[accent] (5.5,0.6) circle (0.09);
+      \fill[good] (2.0,2.7) circle (0.09);
+      \fill[black] (5.4,0.9) circle (0.11);
+      \node[right] at (5.55,0.9) {\scriptsize $q$};
+      \draw[dashed,accent,thick] (5.4,0.9) -- (5.5,0.6);
+      \node[below] at (0.5,0.4) {\scriptsize $c_1$};
+      \node[below] at (3.0,1.1) {\scriptsize $c_2$};
+      \node[below] at (5.5,0.5) {\scriptsize $c_3$};
+      \node[below] at (2.0,2.6) {\scriptsize $c_4$};
+    \end{tikzpicture}
+  \end{center}
 
-  \vspace{0.4em}
-  For a query dominated by rare token $t^*$:
-  \begin{equation*}
-    \langle c, q\rangle \;\approx\; \alpha_{t^*}^2 \, p
-      \;=\; \log^2\!\Big(\tfrac{M}{n_{t^*}}\Big)\cdot\frac{n_{t^*,C}}{M/N}
-  \end{equation*}
+  \vspace{-0.4em}
+  \small
+  \textbf{Speedup}: $N / n_{\text{probe}}$ fewer distance computations.\quad
+  \textbf{Failure mode}: if the relevant cell's centroid is not in the top
+  $n_{\text{probe}}$ by query similarity, its documents are \emph{invisible}.
+\end{frame}
 
-  \vspace{0.3em}
+%% =====================================================================
+\begin{frame}{The mechanism: centroid dilution (intuition)}
+  A centroid is the \emph{average} of the vectors in its cell.
+
+  \medskip
   \begin{itemize}
-    \item $\alpha_{t^*}$ is large for rare tokens (high IDF).
-    \item But $p$ (in-cluster prevalence) is small for rare tokens.
-    \item JL projection adds noise floor $\epsilon \approx \sqrt{\log V / d}$.
-    \item \alert{Rare-token centroid signal lost when $\alpha_{t^*}^2 p \lesssim \epsilon$.}
+    \item A \emph{common} token appears in many docs $\Rightarrow$ contributes
+          strongly to the average $\Rightarrow$ shows up in the centroid.
+    \item A \emph{rare} token appears in a handful of docs $\Rightarrow$ its
+          contribution is averaged \emph{away} $\Rightarrow$ nearly invisible
+          in the centroid.
   \end{itemize}
 
   \medskip
-  \emph{Larger embedding $d$ helps $\epsilon$, but cannot fix small $p$.}
+  Now consider a query dominated by that rare token:
+  \begin{itemize}
+    \item Query vector has huge weight on the rare token direction.
+    \item Every centroid --- \emph{including the one containing the relevant docs} ---
+          has almost zero weight on that direction.
+    \item Result: \alert{all centroids look equally (un)related to the query}.
+          Cluster selection becomes essentially random.
+  \end{itemize}
+
+  \medskip
+  \emph{The failure is not the embedding. It is the averaging step in the index.}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{Experimental setup}
+\begin{frame}{The mechanism: the bound}
+  Centroid of cluster $C$:\;
+  $c \;=\; \dfrac{1}{|C|}\sum_{d\in C} f(d)$
+
+  \medskip
+  For a query $q$ dominated by rare token $t^*$ with IDF-like weight
+  $\alpha_{t^*}$ and in-cluster prevalence $p = n_{t^*, C}/(M/N)$:
+  \begin{equation*}
+    \langle c,\, q\rangle
+      \;\approx\; \alpha_{t^*}^2 \, p
+      \;=\; \underbrace{\log^2\!\Big(\tfrac{M}{n_{t^*}}\Big)}_{\text{IDF, big for rare}}
+            \cdot\underbrace{\frac{n_{t^*, C}}{M/N}}_{\text{prevalence, small for rare}}
+  \end{equation*}
+
+  \medskip
+  \textbf{JL noise floor}. Any embedding of dimension $d$ obtained by
+  Johnson--Lindenstrauss random projection preserves inner products
+  \emph{up to} a noise term:
+  \begin{equation*}
+     \epsilon \;\approx\; \sqrt{\log V / d}
+  \end{equation*}
+  ($V$ = vocabulary size). Signals weaker than $\epsilon$ are indistinguishable
+  from random.
+
+  \medskip
+  \alert{The centroid signal is lost whenever $\alpha_{t^*}^2 \, p \;\lesssim\; \epsilon$.}
+  \emph{Larger $d$ shrinks $\epsilon$; nothing shrinks the fact that $p$ is small.}
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{HNSW isn't a way out}
+  \textbf{HNSW} is not partition-based --- it is a \emph{layered proximity graph}.
+  Greedy descent from a hub node down to the query's local neighborhood.
+
+  \medskip
+  \textbf{So why does it fail on the same queries?}
+  \begin{itemize}
+    \item Graph edges are built from Euclidean distances during insertion.
+    \item Dense regions of the embedding space get thick, well-connected
+          subgraphs. Rare vectors land in sparse regions --- \emph{few incoming
+          edges from any hub}.
+    \item Greedy search from a hub cannot reach an orphan node without a long
+          detour: it stops at a locally-good but globally-wrong region.
+    \item Widening the beam (\texttt{efSearch}) helps --- but with diminishing
+          returns.
+  \end{itemize}
+
+  \medskip
+  \textbf{The pattern is the same}: rare-token vectors are structurally hard
+  to \emph{reach}, whether the structure is a partition (IVF) or a graph (HNSW).
+  Different mechanism; \alert{same victims}.
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{Experimental setup (compact)}
   \begin{columns}[T]
     \column{0.55\textwidth}
-    \textbf{Datasets}
+    \textbf{Datasets} (1{,}000 queries per subset)
     \begin{itemize}
-      \item \textbf{Home Depot}: 54{,}667 product titles
-      \item \textbf{MS MARCO Passage v1.1}: 82{,}360 passages
+      \item Home Depot (HD): 54{,}667 product titles
+      \item MS MARCO Passage v1.1: 82{,}360 passages
     \end{itemize}
 
-    \textbf{Three query subsets per dataset}\\
-    (1{,}000 queries each)
+    \textbf{Query subsets}
     \begin{itemize}
-      \item Standard \;\;\textbar\;\; Rare ($\le 5$ docs) \;\;\textbar\;\; ID
+      \item standard $\;\vert\;$ rare ($\le 5$ docs) $\;\vert\;$ ID
     \end{itemize}
 
     \column{0.45\textwidth}
-    \textbf{Representation}
-    \begin{itemize}
-      \item Char-trigram + JL projection
-      \item $d\in\{256, 512, 1024\}$
-      \item Unsupervised
-    \end{itemize}
+    \textbf{Representation}: char-trigram + JL projection,
+    $d\in\{256,512,1024\}$, unsupervised.
 
-    \textbf{Indices (FAISS)}
-    \begin{itemize}
-      \item Flat (exact)
-      \item IVF (\texttt{nlist}, \texttt{nprobe} sweep)
-      \item HNSW ($M{=}16$, $\texttt{efC}{=}200$, \texttt{efS} sweep)
-      \item BM25 (Pyserini)
-    \end{itemize}
+    \textbf{Indices (FAISS)}: Flat, IVF, HNSW ($M{=}16$, $\text{efC}{=}200$),
+    BM25 baseline (Pyserini).
   \end{columns}
 
-  \vspace{1em}
-  \begin{block}{Why unsupervised trigram, not DPR / Sentence-BERT?}
-    A supervised encoder abstracts away the lexical detail that \emph{defines} a
-    spear-fishing query. The Flat baseline would already fail on IDs---conflating
-    representation failure with indexing failure. We need a representation that
-    \emph{provably} preserves lexical distances (Johnson--Lindenstrauss).
+  \vspace{0.8em}
+  \begin{block}{Why unsupervised trigrams?}
+    A supervised encoder abstracts away the lexical detail that \emph{defines}
+    spear-fishing queries. To isolate the \emph{index} bottleneck from the
+    representation bottleneck we need a representation that provably preserves
+    lexical distances (Johnson--Lindenstrauss).
   \end{block}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{Headline result: the gap}
+\begin{frame}{Headline result: the Flat $\to$ HNSW gap}
   \begin{center}
     \small
     \setlength{\tabcolsep}{6pt}
@@ -167,48 +231,23 @@
       MS MARCO & {\color{accent}\textbf{id}} & {\color{accent}\textbf{0.174}} & 0.152 & {\color{accent}\textbf{0.071}} & --- \\
       \bottomrule
     \end{tabular}\\[4pt]
-    {\footnotesize Recall@10 at $d{=}1024$, across-token trigrams, best ANN sweep config.}
+    {\footnotesize Recall@10 at $d{=}1024$, best ANN sweep config.}
   \end{center}
 
-  \vspace{0.3em}
-  \footnotesize
+  \vspace{0.4em}
   \begin{itemize}
-    \item Flat$\to$HNSW gap (relative):\;
-          HD \{standard \textbf{1.8\%}, rare \textbf{17.5\%}, \alert{id \textbf{62.6\%}}\};\;
-          MM \{standard \textbf{5.3\%}, rare \textbf{19.0\%}, \alert{id \textbf{59.2\%}}\}.
-    \item Paired-bootstrap $95\%$ CI on Flat$-$HNSW excludes zero everywhere
-          (HD-ID $+0.576$, MM-ID $+0.138$).
-    \item \emph{MS MARCO caveat:} BM25 $>$ Flat dense on standard/rare reflects a
-          representation limit of unsupervised trigrams---our claim is the
-          Flat$\to$ANN \emph{gap}, well-defined at any absolute level.
+    \item Relative Flat$\to$HNSW loss:
+          HD $\{$standard \textbf{1.8\%}, rare \textbf{17.5\%},
+          \alert{id \textbf{62.6\%}}$\}$; MM analogous.
+    \item The gap tracks the query population exactly as the theory predicts.
   \end{itemize}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{Indirect evidence: IVF cluster granularity}
-  \begin{columns}[T]
-    \column{0.55\textwidth}
-    \includegraphics[width=\textwidth]{figures/ivf_nlist_sensitivity.png}
-
-    \column{0.45\textwidth}
-    \textbf{Theory predicts}: smaller clusters $\Rightarrow$ less centroid dilution
-    $\Rightarrow$ rare/ID queries benefit more from finer clustering.
-
-    \medskip
-    \textbf{Data}: rare \& ID gain
-    \emph{2--3$\times$ more} (relative) than standard going from
-    $n_{\text{list}}{=}200 \to 1000$.
-
-    \medskip
-    Asymmetric improvement is exactly what the centroid-dilution bound (Eq.~1) predicts.
-  \end{columns}
-\end{frame}
-
-%% =====================================================================
 \begin{frame}{Direct evidence: measure the centroid signal}
-  \textbf{For each query}, compute the centroid signal
-  $\langle q, c_{\text{rel}}\rangle$ on the centroid of the query's relevant
-  cluster (IVF, $n_{\text{list}}{=}500$, $d{=}1024$).
+  \textbf{For each query}: compute $\langle q,\, c_{\text{rel}}\rangle$
+  on the centroid of the query's \emph{relevant} cluster
+  (IVF, $n_{\text{list}}{=}500$, $d{=}1024$, HD).
 
   \begin{columns}[T]
     \column{0.55\textwidth}
@@ -219,7 +258,7 @@
     \setlength{\tabcolsep}{3pt}
     \begin{tabular}{lrrr}
       \toprule
-      Subset (HD) & signal & rank & hit@250 \\
+      Subset & signal & rank & hit@250 \\
       \midrule
       standard & 0.279 & 2   & 97\% \\
       rare     & 0.066 & 69  & 81\% \\
@@ -228,73 +267,46 @@
     \end{tabular}
 
     \medskip
-    \alert{$\sim 40\times$ collapse} from standard to ID:\\
-    centroid signal disappears into the JL noise floor exactly as the bound (Eq.~1) predicts.\\[0.3em]
-    For HD-ID queries, $41\%$ of relevant clusters fall outside the top-half by centroid
-    score---\emph{structurally unrecoverable}.
+    \alert{$\sim 40\times$ collapse} of the centroid signal from standard to ID
+    --- the correct cluster is buried at rank $\sim 200$.
+  \end{columns}
+
+  \medskip
+  \small The bound $\langle c,q\rangle \approx \alpha_{t^*}^2 p$ is not just
+  suggestive --- it is what we \emph{measure}.
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{The production-visible symptom}
+  \begin{columns}[T]
+    \column{0.55\textwidth}
+    \includegraphics[width=\textwidth]{figures/D_zero_rate.png}
+
+    \column{0.45\textwidth}
+    \textbf{Fraction of queries with zero relevant docs in top-10:}
+    \begin{itemize}
+      \item HD-id: Flat \textbf{13\%} $\to$ HNSW \alert{\textbf{71\%}}
+      \item MM-id: Flat \textbf{78\%} $\to$ HNSW \alert{\textbf{92\%}}
+      \item Standard: within $\pm 2$ pp on both datasets.
+    \end{itemize}
+
+    \medskip
+    \textbf{Cost to match Flat recall} (efSearch, HD):
+    \begin{itemize}
+      \item standard: \textbf{2.7$\times$ faster} than Flat
+      \item id: \alert{\textbf{40$\times$ slower}} than Flat
+    \end{itemize}
+    ANN's speedup evaporates on the population that needs it most.
   \end{columns}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{The empty-result rate}
-  \includegraphics[width=\textwidth]{figures/D_zero_rate.png}
-
-  \begin{itemize}
-    \item HD-id Flat \textbf{13\%} $\to$ HNSW \alert{\textbf{71\%}} return nothing relevant in top-10.
-    \item MM-id Flat \textbf{78\%} $\to$ HNSW \alert{\textbf{92\%}}.
-    \item Standard subsets: $\le 2$ percentage points either way on both datasets.
-    \item \emph{This is the production-visible symptom.}
-  \end{itemize}
-\end{frame}
-
-%% =====================================================================
-\begin{frame}{The recall--latency trade-off changes shape}
-  \centering
-  \includegraphics[width=0.88\textwidth]{figures/pareto_recall_vs_latency.png}
-
-  \vspace{-0.6em}
-  {\scriptsize HNSW efSearch sweep (standard FAISS recipe $M{=}16$, $\textrm{efC}{=}200$) vs.\ Flat (red square). Red region = strictly Pareto-dominated by Flat.}
-\end{frame}
-
-%% =====================================================================
-\begin{frame}{The cost-to-close ratio (corpus-invariant)}
-  \texttt{efSearch} needed to reach $95\%$ of Flat's Recall@10:
-  \vspace{0.3em}
-  \begin{center}
-    \small
-    \setlength{\tabcolsep}{6pt}
-    \begin{tabular}{lrrr}
-      \toprule
-      Subset & efS & ms/q & vs.\ Flat \\
-      \midrule
-      HD-standard & $100$    & $0.39$  & {\color{good}\textbf{2.7$\times$ faster}} \\
-      HD-rare     & $2{,}000$ & $6.94$  & $6.5\times$ slower \\
-      HD-{\color{accent}id}  & {\color{accent}\textbf{$8{,}000$}} & {\color{accent}$41.9$} & {\color{accent}\textbf{$40\times$ slower}} \\
-      \midrule
-      MM-standard & $1{,}000$ & $3.48$  & $2.1\times$ slower \\
-      MM-rare     & $16{,}000$ & $129.6$ & $79\times$ slower \\
-      MM-{\color{accent}id}  & {\color{accent}\textbf{$16{,}000$}} & {\color{accent}$132.0$} & {\color{accent}\textbf{$81\times$ slower}} \\
-      \bottomrule
-    \end{tabular}
-  \end{center}
-
-  \vspace{0.6em}
-  \begin{itemize}
-    \item Standard queries: HNSW gives the canonical ANN speedup.
-    \item ID queries: need \alert{$80$--$160\times$ more efSearch budget} than standard.
-    \item Search cost scales $\sim$linearly in efSearch $\Rightarrow$ this ratio
-          \emph{generalizes to any corpus size}.
-  \end{itemize}
-\end{frame}
-
-%% =====================================================================
-\begin{frame}{``But this is only because the embeddings are simple''}
-  Reviewer question we anticipated: \emph{do learned dense encoders avoid this?}
+\begin{frame}{``But learned encoders would fix this''}
+  Anticipated question: \emph{do supervised dense encoders escape the issue?}
 
   \medskip
-  Re-ran the full grid with \texttt{all-MiniLM-L6-v2} (Sentence-BERT, 384-dim, supervised).
+  Re-ran with \texttt{all-MiniLM-L6-v2} (Sentence-BERT, 384-dim):
 
-  \medskip
   \begin{center}
     \small
     \setlength{\tabcolsep}{6pt}
@@ -306,7 +318,6 @@
       HD       & rare     & 0.751 & 0.428 \\
       HD       & {\color{accent}id} & {\color{good}0.874} & {\color{accent}\textbf{0.010}} \\
       MS MARCO & standard & 0.471 & {\color{good}\textbf{0.894}} \\
-      MS MARCO & rare     & 0.205 & 0.226 \\
       MS MARCO & {\color{accent}id} & {\color{good}0.174} & {\color{accent}\textbf{0.001}} \\
       \bottomrule
     \end{tabular}
@@ -314,53 +325,26 @@
 
   \vspace{0.5em}
   \begin{itemize}
-    \item MiniLM nearly doubles MS MARCO standard recall---as designed.
-    \item MiniLM \textbf{cannot distinguish identifiers}: ``12345'' $\approx$ ``67890''.
+    \item MiniLM \emph{cannot distinguish identifiers} --- ``12345'' $\approx$ ``67890''.
     \item Representation collapses \emph{before} the index has a chance to bias.
-    \item This is exactly why a supervised encoder is the \emph{wrong instrument}
-          for our study---and exactly why hybrid retrieval is needed in production.
+    \item Which is precisely why hybrid retrieval exists.
   \end{itemize}
-\end{frame}
-
-%% =====================================================================
-\begin{frame}{What this means for production}
-  \begin{block}{Two ways to read the gap}
-    \begin{itemize}
-      \item \textbf{Default efSearch:} HNSW forfeits $\sim 63\%$ of achievable
-            recall on identifier queries, $\sim 18\%$ on rare, $\sim 2\%$ on standard.
-            \emph{Visible:} 71\% of HD-ID HNSW queries return nothing relevant.
-      \item \textbf{Match Flat recall:} on ID you must pay $40$--$80\times$ Flat
-            latency. ANN's speedup advantage \emph{evaporates} on the population
-            that needs reliability the most.
-    \end{itemize}
-  \end{block}
-
-  \medskip
-  \textbf{Recommendations:}
-  \begin{enumerate}
-    \item \emph{Query-type-aware routing}: send spear-fishing traffic to BM25 / Flat.
-    \item \emph{Index-aware training}: penalize placement of rare features in
-          poorly-reachable embedding regions.
-    \item \emph{Hybrid retrieval}: sparse for precision on rare tokens, dense for
-          semantic generalization---now with a quantitative justification.
-  \end{enumerate}
 \end{frame}
 
 %% =====================================================================
 \begin{frame}{Takeaways}
   \begin{enumerate}
-    \item Representation capacity is \emph{necessary but not sufficient} for
-          production dense retrieval.
-    \item ANN indices introduce a \emph{second}, structurally different failure
-          mode concentrated on rare-token / identifier queries.
-    \item We formalized this as \textbf{indexing bias} + \textbf{centroid-dilution
-          bound}, then directly measured the centroid signal per query
-          ($\sim 40\times$ collapse from standard to ID).
-    \item Reaching Flat-equivalent recall on ID requires $80$--$160\times$ more
-          \texttt{efSearch} budget than on standard---the corpus-invariant
-          quantification of the ANN value-proposition collapse.
-    \item Supervised encoders don't escape this---they collapse at the
-          representation stage on the same queries.
+    \item Production dense retrieval is hybrid for a reason. If you want to
+          drop the sparse side, you have to clear \emph{two} bottlenecks, not one.
+    \item Bottleneck 1 (representation) is well-studied. Bottleneck 2
+          (indexing) is what this paper isolates and quantifies.
+    \item Centroid dilution + JL noise floor give a closed-form bound; the
+          $\sim 40\times$ centroid-signal collapse from standard to ID is
+          exactly what the bound predicts.
+    \item HNSW is not a workaround --- the mechanism differs, the victims
+          don't.
+    \item Practical implication: query-type-aware routing, index-aware
+          training, or --- most simply --- keep the sparse side.
   \end{enumerate}
 
   \vfill
