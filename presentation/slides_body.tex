@@ -61,64 +61,67 @@
 
 %% =====================================================================
 \begin{frame}{The idealized case: BM25 \emph{is} embedding search}
-  \textbf{Reframe BM25 as a dense inner product} in a huge, discrete
-  embedding space $\mathbb{R}^V$ (one dimension per token, $V \approx 10^5$).
+  Reframe BM25 as a dense inner product in a huge, discrete embedding space
+  $\mathbb{R}^V$ --- \emph{one dimension per token}
+  ($V$ = vocabulary size; for our char-trigrams, order $10^6$--$10^7$).
 
   \medskip
+  Let $M$ = number of docs in the corpus and $n_t$ = number of docs containing
+  token $t$. Each doc $d$ becomes a sparse, IDF-weighted vector:
+  \[
+    f(d)_t \;=\; \alpha_t \;=\; \log\!\big(M / n_t\big)
+    \quad\text{if } t \in d, \text{ else } 0.
+  \]
+  A query is a \emph{binary indicator}: $q_t = 1$ if $t \in q$, else $0$.
+
+  \medskip
+  For a query $q = \{t^*\}$ with rare token $t^*$:
   \begin{itemize}
-    \item Each doc $d$ is a sparse vector $f(d) \in \mathbb{R}^V$ with
-          $f(d)_t = \alpha_t$ (IDF weight) if $t \in d$, else $0$.
-    \item Query $q$ dominated by rare token $t^*$: $q$ has weight
-          $\alpha_{t^*}$ in that direction.
-    \item Inner product with a relevant doc $d_{\text{rel}}$ (contains $t^*$):
-          \[
-            \langle q, f(d_{\text{rel}})\rangle \;=\; \alpha_{t^*}^{\,2}
-            \qquad \text{(big --- } \alpha_{t^*} = \log\!\big(M/n_{t^*}\big)\text{).}
-          \]
-    \item Inner product with an irrelevant doc: essentially $0$.
-    \item \alert{Perfect separation on spear-fishing queries.} This is
-          exactly why BM25 works. It is a nearest-neighbor search in
-          $\mathbb{R}^V$.
+    \item Relevant doc $d_{\text{rel}}$ (contains $t^*$):
+          $\;\langle q, f(d_{\text{rel}})\rangle = \alpha_{t^*}$
+          --- \alert{big}, because $n_{t^*}$ is small.
+    \item Irrelevant doc: $\langle q, f(d)\rangle = 0$.
   \end{itemize}
+  \alert{Perfect separation on spear-fishing.} That is why BM25 works ---
+  it is nearest-neighbor search in $\mathbb{R}^V$.
 
   \medskip
-  \textbf{The catch}: $V$ is huge. Storing and searching $\mathbb{R}^V$ is
-  what BM25 does with an inverted list --- practical, but the wrong shape for
-  hybrid or pure dense. To use ANN we must compress $\mathbb{R}^V \to
-  \mathbb{R}^d$ with $d \ll V$.
-
-  \emph{The rest of this talk is what compression costs.}
+  \textbf{Catch}: $V$ is enormous. BM25 handles it with an inverted list ---
+  ANN cannot. To use ANN we must compress $\mathbb{R}^V \to \mathbb{R}^k$
+  with $k \ll V$. \emph{What compression costs is the rest of the talk.}
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{Compressing $\mathbb{R}^V \to \mathbb{R}^d$: Johnson--Lindenstrauss}
-  Random linear map $A: \mathbb{R}^V \to \mathbb{R}^d$, $d \in \{256, 512, 1024\}$.
+\begin{frame}{Compressing $\mathbb{R}^V \to \mathbb{R}^k$: Johnson--Lindenstrauss}
+  Random linear map $A: \mathbb{R}^V \to \mathbb{R}^k$, target dimension
+  $k \in \{256, 512, 1024\}$ (our embedding size --- distinct from the
+  document symbol $d$).
 
   \begin{block}{JL theorem (informal)}
     Given $M$ vectors in $\mathbb{R}^V$, a random projection $A$ preserves
     all pairwise inner products \emph{up to a multiplicative error} $\epsilon$
     with high probability, provided
     \[
-      d \;\gtrsim\; \frac{\log M}{\epsilon^2}
+      k \;\gtrsim\; \frac{\log M}{\epsilon^2}
       \qquad\Longleftrightarrow\qquad
-      \epsilon \;\approx\; \sqrt{\tfrac{\log V}{d}}.
+      \epsilon \;\approx\; \sqrt{\tfrac{\log V}{k}}.
     \]
   \end{block}
 
   \textbf{What survives, what dies}:
   \begin{itemize}
-    \item Any inner product with magnitude \alert{$\gg \epsilon$} is preserved.
-          $\Rightarrow$ Spear-fishing signal $\alpha_{t^*}^{\,2}$ from the previous
+    \item Inner products with magnitude \alert{$\gg \epsilon$} are preserved.
+          $\Rightarrow$ Spear-fishing signal $\alpha_{t^*}$ from the previous
           slide easily clears $\epsilon$: \textbf{Flat search on the projected
           embedding is a clean oracle.}
-    \item Any inner product with magnitude \alert{$\lesssim \epsilon$}
-          is drowned in projection noise --- indistinguishable from random.
-    \item Bigger $d$ shrinks $\epsilon$; nothing else does.
+    \item Magnitudes \alert{$\lesssim \epsilon$} are drowned in projection
+          noise --- indistinguishable from random.
+    \item Bigger $k$ shrinks $\epsilon$; nothing else does.
   \end{itemize}
 
   \medskip
-  \small So after JL alone, spear-fishing still works. The failure emerges when
-  we add the \emph{second} compression --- clustering --- on top. That is IVF.
+  \small So after JL alone, spear-fishing still works. The failure emerges
+  when we add the \emph{second} compression --- clustering --- on top. IVF.
 \end{frame}
 
 %% =====================================================================
@@ -180,9 +183,9 @@
   \medskip
   Now consider a query dominated by that rare token:
   \begin{itemize}
-    \item Query vector has huge weight on the rare token direction.
+    \item Query vector is nonzero on the rare-token direction.
     \item Every centroid --- \emph{including the one containing the relevant docs} ---
-          has almost zero weight on that direction.
+          has \emph{almost zero} weight on that direction (averaged away).
     \item Result: \alert{all centroids look equally (un)related to the query}.
           Cluster selection becomes essentially random.
   \end{itemize}
@@ -193,51 +196,38 @@
 
 %% =====================================================================
 \begin{frame}{The bound: when does the centroid signal survive?}
-  \footnotesize\emph{Recall}: in $\mathbb{R}^V$, $\langle q, f(d_{\text{rel}})\rangle = \alpha_{t^*}^{\,2}$; JL preserves it. IVF selects clusters by \textbf{centroid} inner product $\Rightarrow$ average kicks in.
+  \footnotesize \emph{So far}: in $\mathbb{R}^V$ the relevant doc scores
+  $\alpha_{t^*}$; JL preserves it. But \textbf{IVF selects clusters by the
+  centroid}, and a centroid is an average.
 
-  \begin{columns}[T]
-    \column{0.42\textwidth}
-    \scriptsize
-    \textbf{Notation}
-    \setlength{\itemsep}{-1pt}
-    \begin{itemize}
-      \item $M$ = corpus size (\# docs)
-      \item $N$ = \# IVF clusters
-      \item $C$ = one cluster, $|C| \approx M/N$
-      \item $t^*$ = rare token dominating the query
-      \item $n_{t^*}$ = \# docs in corpus with $t^*$
-      \item $n_{t^*,C}$ = \# docs \emph{in $C$} with $t^*$
-      \item $\alpha_{t^*} = \log(M/n_{t^*})$ (IDF)
-      \item $\epsilon$ = JL noise floor
-    \end{itemize}
+  \small
+  \textbf{Step 1 --- Centroid.} Partition into $N$ clusters, average size
+  $|C| \approx M/N$:
+  \(
+    c_C = \tfrac{1}{|C|} \sum_{d \in C} f(d).
+  \)
 
-    \column{0.58\textwidth}
-    \small
-    \textbf{Step 1.} Centroid = average of docs in the cluster:
-    \[
-      c_C \;=\; \tfrac{1}{|C|}\sum_{d\in C} f(d).
-    \]
+  \textbf{Step 2 --- Prevalence.} Let $n_{t^*,C}$ = \# docs \emph{in $C$}
+  containing $t^*$. Only these contribute to the $t^*$-direction of $c_C$:
+  \[
+    c_C \big|_{t^*}
+    \;\approx\;
+    \underbrace{\tfrac{n_{t^*, C}}{|C|}}_{\displaystyle p\;=\;\text{prevalence of }t^*\text{ in }C}
+    \;\cdot\; \alpha_{t^*}.
+  \]
+  Rare token $\Rightarrow$ $p$ tiny (often $1/|C|$, or $0$).
 
-    \textbf{Step 2.} $t^*$ contributes to $c_C$ only through the $n_{t^*,C}$
-    docs in $C$ that contain it:
-    \[
-      c_C \big|_{t^*}
-      \;\approx\; \underbrace{\tfrac{n_{t^*,C}}{|C|}}_{p \;=\; \text{prevalence}} \cdot\, \alpha_{t^*}.
-    \]
-    Rare token $\Rightarrow p$ tiny.
-
-    \textbf{Step 3.} Query dominated by $t^*$ (weight $\alpha_{t^*}$):
-    \[
-      \boxed{\;\langle c_C,\, q\rangle \;\approx\; \alpha_{t^*}^{\,2}\cdot p\;}
-    \]
-  \end{columns}
+  \textbf{Step 3 --- Query.} $q$ = binary indicator of $t^*$ ($q_{t^*}=1$):
+  \[
+    \boxed{\;\langle q,\, c_C \rangle \;\approx\; \alpha_{t^*} \cdot p\;}
+  \]
 
   \begin{block}{Survival condition}
     \footnotesize\centering
-    Relevant centroid recognizable iff $\;\alpha_{t^*}^{\,2}\cdot p \gg \epsilon.\;$
-    Rare: $\alpha$ big, $p$ tiny $\Rightarrow$ product $<\epsilon$ $\Rightarrow$
-    wrong cluster picked.
-    \emph{Bigger $d$ helps $\epsilon$; nothing helps $p$.}
+    Relevant centroid picked iff $\;\alpha_{t^*}\cdot p \gg \epsilon\;$
+    (JL floor). Rare: $\alpha$ big, $p$ tiny $\Rightarrow$ product
+    $<\epsilon$ $\Rightarrow$ wrong cluster.
+    Bigger $k$ helps $\epsilon$; nothing helps $p$.
   \end{block}
 \end{frame}
 
