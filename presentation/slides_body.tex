@@ -207,12 +207,12 @@
     c_C = \tfrac{1}{|C|} \sum_{d \in C} f(d).
   \)
 
-  \textbf{Step 2 --- Prevalence.} Let $n_{t^*,C}$ = \# docs \emph{in $C$}
+  \textbf{Step 2 --- Prevalence.} Let $n_{t^*}$ = \# docs \emph{in $C$}
   containing $t^*$. Only these contribute to the $t^*$-direction of $c_C$:
   \[
     c_C \big|_{t^*}
     \;\approx\;
-    \underbrace{\tfrac{n_{t^*, C}}{|C|}}_{\displaystyle p\;=\;\text{prevalence of }t^*\text{ in }C}
+    \underbrace{\tfrac{n_{t^*}}{|C|}}_{\displaystyle p\;=\;\text{prevalence of }t^*\text{ in }C}
     \;\cdot\; \alpha_{t^*}.
   \]
   Rare token $\Rightarrow$ $p$ tiny (often $1/|C|$, or $0$).
