@@ -279,11 +279,14 @@
   \end{columns}
 
   \vspace{0.8em}
-  \begin{block}{Why unsupervised trigrams?}
-    A supervised encoder abstracts away the lexical detail that \emph{defines}
-    spear-fishing queries. To isolate the \emph{index} bottleneck from the
-    representation bottleneck we need a representation that provably preserves
-    lexical distances (Johnson--Lindenstrauss).
+  \begin{block}{Why JL trigrams --- not BM25, not a learned encoder?}
+    BM25 lives in $\mathbb{R}^V$: sparse, no ANN index applies.
+    We want to measure what \emph{ANN itself} costs, so we need a
+    \alert{dense proxy for BM25}: same lexical distances, but in
+    $\mathbb{R}^k$ where FAISS Flat/IVF/HNSW actually run.
+    That is exactly JL trigrams --- Flat on them tracks BM25 on the ID subset.
+    A learned encoder would already collapse at Flat (slide 14),
+    conflating representation with index failure.
   \end{block}
 \end{frame}
 
