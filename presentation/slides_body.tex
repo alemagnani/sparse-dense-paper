@@ -102,8 +102,8 @@
     all pairwise inner products \emph{up to a multiplicative error} $\epsilon$
     with high probability, provided
     \[
-      k \;\gtrsim\; \frac{\log M}{\epsilon^2}
-      \qquad\Longleftrightarrow\qquad
+      k \;\gtrsim\; \frac{\log M}{\epsilon^2},
+      \qquad\text{equivalently}\qquad
       \epsilon \;\approx\; \sqrt{\tfrac{\log V}{k}}.
     \]
   \end{block}
@@ -224,7 +224,7 @@
 
   \begin{block}{Survival condition}
     \footnotesize\centering
-    Relevant centroid picked iff $\;\alpha_{t^*}\cdot p \gg \epsilon\;$
+    Relevant centroid picked \emph{only when} $\;\alpha_{t^*}\cdot p \gg \epsilon\;$
     (JL floor). Rare: $\alpha$ big, $p$ tiny $\Rightarrow$ product
     $<\epsilon$ $\Rightarrow$ wrong cluster.
     Bigger $k$ helps $\epsilon$; nothing helps $p$.
