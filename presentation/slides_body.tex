@@ -31,10 +31,12 @@
   \end{itemize}
 
   \vspace{0.5em}
-  \begin{block}{Headline}
-    Switching Flat $\to$ HNSW forfeits \textbf{$\sim 63\%$} of achievable Recall@10
-    on identifier queries---and less than $2\%$ on standard queries.
-    Same embedding. The index alone.
+  \begin{block}{Headline (the index alone --- same embedding)}
+    \textbf{Flat $\to$ IVF} (partition index the theory targets):\;
+    forfeits \alert{$\sim 33\%$} of achievable Recall@10 on identifier queries,
+    $<5\%$ on standard.\\[0.2em]
+    \textbf{Flat $\to$ HNSW} (graph index, same population):
+    \alert{$\sim 63\%$} on identifier queries, $<2\%$ on standard.
   \end{block}
 \end{frame}
 
@@ -55,6 +57,68 @@
           \textbf{rare} ($\le 5$ docs), \textbf{ID} (extreme case: doc identifier
           as query).
   \end{itemize}
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{The idealized case: BM25 \emph{is} embedding search}
+  \textbf{Reframe BM25 as a dense inner product} in a huge, discrete
+  embedding space $\mathbb{R}^V$ (one dimension per token, $V \approx 10^5$).
+
+  \medskip
+  \begin{itemize}
+    \item Each doc $d$ is a sparse vector $f(d) \in \mathbb{R}^V$ with
+          $f(d)_t = \alpha_t$ (IDF weight) if $t \in d$, else $0$.
+    \item Query $q$ dominated by rare token $t^*$: $q$ has weight
+          $\alpha_{t^*}$ in that direction.
+    \item Inner product with a relevant doc $d_{\text{rel}}$ (contains $t^*$):
+          \[
+            \langle q, f(d_{\text{rel}})\rangle \;=\; \alpha_{t^*}^{\,2}
+            \qquad \text{(big --- } \alpha_{t^*} = \log\!\big(M/n_{t^*}\big)\text{).}
+          \]
+    \item Inner product with an irrelevant doc: essentially $0$.
+    \item \alert{Perfect separation on spear-fishing queries.} This is
+          exactly why BM25 works. It is a nearest-neighbor search in
+          $\mathbb{R}^V$.
+  \end{itemize}
+
+  \medskip
+  \textbf{The catch}: $V$ is huge. Storing and searching $\mathbb{R}^V$ is
+  what BM25 does with an inverted list --- practical, but the wrong shape for
+  hybrid or pure dense. To use ANN we must compress $\mathbb{R}^V \to
+  \mathbb{R}^d$ with $d \ll V$.
+
+  \emph{The rest of this talk is what compression costs.}
+\end{frame}
+
+%% =====================================================================
+\begin{frame}{Compressing $\mathbb{R}^V \to \mathbb{R}^d$: Johnson--Lindenstrauss}
+  Random linear map $A: \mathbb{R}^V \to \mathbb{R}^d$, $d \in \{256, 512, 1024\}$.
+
+  \begin{block}{JL theorem (informal)}
+    Given $M$ vectors in $\mathbb{R}^V$, a random projection $A$ preserves
+    all pairwise inner products \emph{up to a multiplicative error} $\epsilon$
+    with high probability, provided
+    \[
+      d \;\gtrsim\; \frac{\log M}{\epsilon^2}
+      \qquad\Longleftrightarrow\qquad
+      \epsilon \;\approx\; \sqrt{\tfrac{\log V}{d}}.
+    \]
+  \end{block}
+
+  \textbf{What survives, what dies}:
+  \begin{itemize}
+    \item Any inner product with magnitude \alert{$\gg \epsilon$} is preserved.
+          $\Rightarrow$ Spear-fishing signal $\alpha_{t^*}^{\,2}$ from the previous
+          slide easily clears $\epsilon$: \textbf{Flat search on the projected
+          embedding is a clean oracle.}
+    \item Any inner product with magnitude \alert{$\lesssim \epsilon$}
+          is drowned in projection noise --- indistinguishable from random.
+    \item Bigger $d$ shrinks $\epsilon$; nothing else does.
+  \end{itemize}
+
+  \medskip
+  \small So after JL alone, spear-fishing still works. The failure emerges when
+  we add the \emph{second} compression --- clustering --- on top. That is IVF.
 \end{frame}
 
 %% =====================================================================
@@ -128,33 +192,53 @@
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{The mechanism: the bound}
-  Centroid of cluster $C$:\;
-  $c \;=\; \dfrac{1}{|C|}\sum_{d\in C} f(d)$
+\begin{frame}{The bound: when does the centroid signal survive?}
+  \footnotesize\emph{Recall}: in $\mathbb{R}^V$, $\langle q, f(d_{\text{rel}})\rangle = \alpha_{t^*}^{\,2}$; JL preserves it. IVF selects clusters by \textbf{centroid} inner product $\Rightarrow$ average kicks in.
 
-  \medskip
-  For a query $q$ dominated by rare token $t^*$ with IDF-like weight
-  $\alpha_{t^*}$ and in-cluster prevalence $p = n_{t^*, C}/(M/N)$:
-  \begin{equation*}
-    \langle c,\, q\rangle
-      \;\approx\; \alpha_{t^*}^2 \, p
-      \;=\; \underbrace{\log^2\!\Big(\tfrac{M}{n_{t^*}}\Big)}_{\text{IDF, big for rare}}
-            \cdot\underbrace{\frac{n_{t^*, C}}{M/N}}_{\text{prevalence, small for rare}}
-  \end{equation*}
+  \begin{columns}[T]
+    \column{0.42\textwidth}
+    \scriptsize
+    \textbf{Notation}
+    \setlength{\itemsep}{-1pt}
+    \begin{itemize}
+      \item $M$ = corpus size (\# docs)
+      \item $N$ = \# IVF clusters
+      \item $C$ = one cluster, $|C| \approx M/N$
+      \item $t^*$ = rare token dominating the query
+      \item $n_{t^*}$ = \# docs in corpus with $t^*$
+      \item $n_{t^*,C}$ = \# docs \emph{in $C$} with $t^*$
+      \item $\alpha_{t^*} = \log(M/n_{t^*})$ (IDF)
+      \item $\epsilon$ = JL noise floor
+    \end{itemize}
 
-  \medskip
-  \textbf{JL noise floor}. Any embedding of dimension $d$ obtained by
-  Johnson--Lindenstrauss random projection preserves inner products
-  \emph{up to} a noise term:
-  \begin{equation*}
-     \epsilon \;\approx\; \sqrt{\log V / d}
-  \end{equation*}
-  ($V$ = vocabulary size). Signals weaker than $\epsilon$ are indistinguishable
-  from random.
+    \column{0.58\textwidth}
+    \small
+    \textbf{Step 1.} Centroid = average of docs in the cluster:
+    \[
+      c_C \;=\; \tfrac{1}{|C|}\sum_{d\in C} f(d).
+    \]
 
-  \medskip
-  \alert{The centroid signal is lost whenever $\alpha_{t^*}^2 \, p \;\lesssim\; \epsilon$.}
-  \emph{Larger $d$ shrinks $\epsilon$; nothing shrinks the fact that $p$ is small.}
+    \textbf{Step 2.} $t^*$ contributes to $c_C$ only through the $n_{t^*,C}$
+    docs in $C$ that contain it:
+    \[
+      c_C \big|_{t^*}
+      \;\approx\; \underbrace{\tfrac{n_{t^*,C}}{|C|}}_{p \;=\; \text{prevalence}} \cdot\, \alpha_{t^*}.
+    \]
+    Rare token $\Rightarrow p$ tiny.
+
+    \textbf{Step 3.} Query dominated by $t^*$ (weight $\alpha_{t^*}$):
+    \[
+      \boxed{\;\langle c_C,\, q\rangle \;\approx\; \alpha_{t^*}^{\,2}\cdot p\;}
+    \]
+  \end{columns}
+
+  \begin{block}{Survival condition}
+    \footnotesize\centering
+    Relevant centroid recognizable iff $\;\alpha_{t^*}^{\,2}\cdot p \gg \epsilon.\;$
+    Rare: $\alpha$ big, $p$ tiny $\Rightarrow$ product $<\epsilon$ $\Rightarrow$
+    wrong cluster picked.
+    \emph{Bigger $d$ helps $\epsilon$; nothing helps $p$.}
+  \end{block}
 \end{frame}
 
 %% =====================================================================
@@ -274,6 +358,43 @@
   \medskip
   \small The bound $\langle c,q\rangle \approx \alpha_{t^*}^2 p$ is not just
   suggestive --- it is what we \emph{measure}.
+
+  \note{%
+  \textbf{Framing.} This is where we stop arguing from theory and start
+  measuring the exact quantity the bound predicts.
+
+  \textbf{What we did (per query).} Train IVF on Home Depot ($n_{\text{list}}=500$,
+  $d=1024$). For every query, look up which cluster actually contains its
+  relevant doc(s) --- call that centroid $c_{\text{rel}}$. Then compute
+  $\langle q, c_{\text{rel}}\rangle$, and also \emph{where} $c_{\text{rel}}$ ranks
+  among all 500 centroids scored against $q$, and whether it makes the top 250
+  (``hit@250'' --- the halfway mark).
+
+  \textbf{Histogram.} Standard queries: signal $\sim 0.28$, clearly separated
+  from zero. Rare queries collapse toward zero ($\sim 0.07$). ID queries pile
+  up at $\sim 0.007$ --- \textbf{40$\times$ smaller than standard}.
+
+  \textbf{Table.} Standard: correct centroid at rank 2 on average, hit@250
+  = 97\% --- IVF with $n_{\text{probe}}=5$ is basically always correct. Rare:
+  rank 69, so you'd need $n_{\text{probe}}\approx 70$ (huge). \textbf{ID:
+  rank 216 out of 500 --- worse than median.} hit@250 = 59\% means
+  \textbf{41\% of ID queries have their relevant cluster in the bottom half}
+  of the centroid ranking. Those are structurally unrecoverable short of
+  scanning all clusters --- which defeats IVF's purpose.
+
+  \textbf{Tie to the bound.} $\langle c,q\rangle \approx \alpha_{t^*}^2 p$.
+  Rare tokens: huge $\alpha$ (IDF), tiny $p$ (prevalence). Product falls
+  under the JL floor $\epsilon$ --- exactly the collapse we measure.
+
+  \textbf{Anticipated question.} ``Just use finer clusters?'' It helps
+  (rare/ID gain 2--3$\times$ more relatively than standard going
+  $n_{\text{list}}$ 200$\to$1000) but you're fighting $p$: shrinking clusters
+  means more centroids to score, i.e.\ slower search. That's the
+  tradeoff Slide 11 quantifies.
+
+  \textbf{Time cue.} Spend a full minute on the two numbers ``rank 216''
+  and ``41\% unrecoverable'' --- this is the empirical hinge of the paper.
+  }
 \end{frame}
 
 %% =====================================================================
@@ -298,6 +419,53 @@
     \end{itemize}
     ANN's speedup evaporates on the population that needs it most.
   \end{columns}
+
+  \note{%
+  \textbf{Framing.} We've shown the mechanism (theory) and the direct
+  measurement (centroid signal). This slide is what the \emph{user} actually
+  sees.
+
+  \textbf{Left: empty-result rate ($D_0$).}
+  $D_0$ = fraction of queries whose top-10 contains \emph{zero} relevant docs
+  --- an empty search page from the user's point of view.
+  \begin{itemize}
+    \item HD-ID: Flat 13\% $\to$ HNSW \textbf{71\%}. Seven of ten ID queries
+          return nothing relevant on HNSW.
+    \item MM-ID: 78\% $\to$ 92\%. Harder dataset, weaker absolute signal.
+    \item Standard queries: within $\pm 2$ pp between Flat and HNSW on
+          \emph{both} datasets --- mainstream traffic sees nothing.
+  \end{itemize}
+  So the failure is \textbf{concentrated on spear-fishing traffic and
+  invisible in aggregate metrics}. Aggregate recall looks fine, product
+  looks broken for the SKU-searching user.
+
+  \textbf{Right: cost-to-close ratio.} Same phenomenon, dual angle.
+  Instead of ``at default efSearch what recall do we get?'' ask ``how
+  much efSearch to \emph{match} Flat's recall?''
+  \begin{itemize}
+    \item Standard queries: efSearch=100 hits 95\% of Flat recall at
+          0.39 ms/q --- 2.7$\times$ \emph{faster} than Flat. Canonical ANN
+          speedup, working as advertised.
+    \item ID queries: efSearch=8000 needed, 41.9 ms/q --- \textbf{40$\times$
+          slower than Flat} on the same corpus. On MS MARCO the ratio
+          reaches $\sim 80\times$.
+  \end{itemize}
+  HNSW's value proposition (``$\approx$Flat recall, way faster'')
+  \textbf{inverts} on IDs: same recall, way slower. You're paying more
+  for the same accuracy on exactly the queries you needed acceleration for.
+
+  \textbf{Corpus generality.} efSearch cost scales roughly linearly in
+  corpus size, so this ratio ports to any $N$ --- not a quirk of 54k or 82k
+  documents.
+
+  \textbf{Landing line for the audience.} If you deploy pure-dense with
+  the standard HNSW recipe and tune efSearch for good aggregate recall
+  at low latency, you are \emph{implicitly deciding} to let 60--90\% of
+  identifier traffic return empty. That decision is invisible in your
+  aggregate metrics and highly visible to the user searching a specific
+  SKU. This is why hybrid isn't belt-and-suspenders --- the sparse side
+  is load-bearing on a population dense cannot serve at practical latency.
+  }
 \end{frame}
 
 %% =====================================================================

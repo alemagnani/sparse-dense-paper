@@ -1,0 +1,671 @@
+PRESENTATION NOTES — "Beyond Representation: Index Structure Limitations
+in Dense Retrieval"
+
+Author: Alessandro Magnani
+Deck: slides_MLMI.pdf / slides_AMLDS.pdf (15 frames)
+Target length: ~15 minutes talk + Q&A
+
+Overall arc:
+  Frames 1-3   Motivation: why "can we drop the sparse side of hybrid?"
+  Frame  4     IVF primer (with diagram)
+  Frame  5     Centroid dilution intuition (verbal)
+  Frame  6     JL theorem — the noise floor tool
+  Frame  7     The bound (notation legend + 3-step derivation)
+  Frame  8     HNSW isn't a way out
+  Frames 9-10  Setup + headline result
+  Frames 11-12 Evidence + production symptom (the "hinge" pair)
+  Frame  13    MiniLM rebuttal
+  Frames 14-15 Takeaways + thanks
+
+Keep the audience oriented: after each theory slide, remind them what
+question you're answering. After each result slide, tie it back to the
+bound.
+
+
+========================================================================
+SLIDE 1 — TITLE
+========================================================================
+
+Say: "Thanks. Today I'm going to talk about a failure mode of dense
+retrieval that has nothing to do with the embedding — it comes from
+the INDEX. And it disproportionately hurts one specific population of
+queries that production systems care a lot about."
+
+Keep it short. Fifteen seconds max.
+
+
+========================================================================
+SLIDE 2 — WHY THIS TALK: CAN WE DROP THE SPARSE SIDE?
+========================================================================
+
+FRAMING
+-------
+"Every serious production retrieval stack today is hybrid: an
+embedding-based ANN index like HNSW or IVF, PLUS an inverted index
+like BM25. Two stores, two scoring paths, extra operational
+complexity. The natural question — the one people keep asking me —
+is: could we just drop the sparse side? Simpler stack, one index,
+one score. That would be a real operational win."
+
+TWO BOTTLENECKS (the core structural point of the talk)
+-------------------------------------------------------
+For pure dense to work, TWO things have to be true:
+  1. REPRESENTATION bottleneck — the embedding has to encode what
+     BM25 encodes. Well-studied (Tay et al. 2020, Fan et al. 2022);
+     capacity grows with dimension d.
+  2. INDEXING bottleneck — even if the embedding IS capable, can
+     the ANN index still find it? Almost nobody studies this. That
+     is what this paper is about.
+
+Say clearly: "We isolate bottleneck 2. Hold representation constant,
+vary only the index."
+
+HEADLINE
+--------
+Two numbers to leave on screen:
+  * Flat -> IVF: ~33% Recall@10 loss on identifier queries, <5% on
+    standard. IVF is the partition index the theory targets.
+  * Flat -> HNSW: ~63% on identifiers, <2% on standard.
+
+Say: "Same embedding for all three indices. The only difference is
+how we search it."
+
+
+========================================================================
+SLIDE 3 — SPEAR-FISHING QUERIES
+========================================================================
+
+DEFINITION
+----------
+"I call these 'spear-fishing queries' — the user is aiming for a
+specific target, not browsing. Operationally: a query whose relevance
+hinges on a single low-frequency high-IDF token. SKUs, part numbers,
+rare terms, precise named entities."
+
+WHY THEY MATTER
+---------------
+Small fraction of traffic, but operationally critical:
+  * empty results -> abandoned carts (e-commerce)
+  * empty results -> broken RAG lookups (LLM apps)
+  * BM25 handles them trivially — exact token match, done.
+  * If pure dense is to replace hybrid, it has to hold up HERE.
+
+THREE SUBSETS (state clearly, they recur through the talk)
+----------------------------------------------------------
+  * STANDARD: real user queries, control
+  * RARE: uni/bigram token appears in <= 5 docs
+  * ID: extreme case — a doc identifier used as its own query
+
+"ID is the stress test. If pure dense can't handle IDs, we've
+identified the failure mode we care about."
+
+
+========================================================================
+SLIDE 4 — QUICK PRIMER: WHAT IS AN IVF INDEX?
+========================================================================
+
+WHY THIS SLIDE EXISTS
+---------------------
+Not everyone in the room knows IVF cold. Go slowly — the theory
+slides depend on this picture.
+
+THE THREE STEPS (walk through the diagram)
+------------------------------------------
+  1. "Cluster the corpus into N cells with k-means. Each cell has a
+     centroid c — the little dark dot in each cluster."
+  2. "At query time, score the query q (black dot) against ALL N
+     centroids. Cheap: N dot products."
+  3. "Keep the top n_probe closest centroids — here, just one, the
+     reddish cluster. Only search documents inside THOSE cells."
+
+SPEEDUP AND FAILURE MODE
+------------------------
+"Speedup is N / n_probe fewer distance computations at query time —
+that's why we do this."
+
+Then the key line: "The failure mode is when the RIGHT cluster's
+centroid is NOT in the top n_probe by similarity to the query. If we
+didn't pick that cluster, its documents are literally invisible. Zero.
+No amount of downstream reranking can save it."
+
+
+========================================================================
+SLIDE 5 — CENTROID DILUTION (INTUITION)
+========================================================================
+
+Do this slide entirely in words. No math yet.
+
+CORE INTUITION
+--------------
+"A centroid is the AVERAGE of the vectors in its cell. That's the
+whole game. Now think about two kinds of tokens:
+  * A COMMON token appears in many docs in the cluster — contributes
+    strongly to the average, shows up clearly in the centroid.
+  * A RARE token appears in only a handful of docs — its
+    contribution is averaged AWAY by all the other docs that don't
+    contain it. Nearly invisible in the centroid."
+
+APPLY TO A SPEAR-FISHING QUERY
+------------------------------
+"Now imagine a query dominated by that rare token — say, an SKU.
+  * The QUERY vector has huge weight on the rare-token direction.
+  * But EVERY centroid — including the one containing the relevant
+    doc — has almost zero weight on that direction.
+  * So the inner product between the query and any centroid is small.
+  * Worse: ALL centroids look roughly equally (un)related to the
+    query. Cluster selection becomes essentially random.
+
+The right cluster doesn't lose because it's actually wrong. It loses
+because the centroid representation has averaged out the very signal
+that would have identified it."
+
+MONEY LINE
+----------
+"The failure is not the embedding. It is the AVERAGING step in the
+index."
+
+TRANSITION
+----------
+"To turn this intuition into a bound I need one tool — the
+Johnson-Lindenstrauss theorem."
+
+
+========================================================================
+SLIDE 6 — JL: OUR DISTANCE-PRESERVING PROJECTION
+========================================================================
+
+WHY THIS SLIDE EXISTS
+---------------------
+The bound (next slide) uses ε as the "noise floor." That ε comes from
+JL. Dedicating a slide to JL means the bound stays clean.
+
+SETUP
+-----
+"Our trigram vectors live in a very high-dim space — R^V where V is
+the vocabulary size, order 10^5. We compress to R^d, d in {256, 512,
+1024}, via a random linear map A. That map is a Johnson-Lindenstrauss
+projection."
+
+THE THEOREM (informal)
+----------------------
+"Take M vectors in R^V. A random projection A: R^V -> R^d preserves
+all pairwise inner products up to a multiplicative error ε, with high
+probability, provided d is at least (log M)/ε^2. Equivalently, for a
+given d, the error is ε ≈ sqrt(log V / d)."
+
+Emphasize: "This is a GUARANTEE. Not empirical. We know before
+running any experiment that distances survive within ε."
+
+WHAT IT MEANS FOR THE PROBLEM
+-----------------------------
+Walk through the bullets:
+  * "Lexical distances between docs survive the projection within ε.
+    So the Flat baseline on our embedding is a clean oracle."
+  * "Any inner product with magnitude MUCH LARGER than ε is
+    preserved by the projection."
+  * "Any inner product with magnitude COMPARABLE to or below ε is
+    drowned in projection noise. Indistinguishable from random."
+  * "Bigger d shrinks ε. Nothing else does."
+
+THE PUNCHLINE
+-------------
+"So ε is a noise floor. Any signal the index needs to detect has to
+clear ε. Hold that thought — the bound on the next slide says exactly
+when the centroid signal clears it and when it doesn't."
+
+WHY WE USE JL (address if audience looks unconvinced)
+------------------------------------------------------
+"You could use a learned encoder instead. But then the Flat baseline
+would already collapse on IDs — because learned encoders throw away
+lexical detail — and we couldn't tell representation failure apart
+from indexing failure. JL is the only projection we know provably
+preserves lexical distances. That's why it's the right instrument
+for this study, even though nobody uses it in production."
+
+
+========================================================================
+SLIDE 7 — THE BOUND: WHEN DOES THE CENTROID SIGNAL SURVIVE?
+========================================================================
+
+WHY THIS SLIDE IS CENTRAL
+-------------------------
+This is the theoretical spine of the paper. If the audience takes
+one equation home, this is the one. Do not rush.
+
+WALK THE NOTATION FIRST (left column)
+-------------------------------------
+Before touching any formula, spend 30 seconds on the legend:
+  * M — total number of documents in the corpus (54,667 for HD)
+  * N — number of IVF clusters (e.g. 500)
+  * C — a specific cluster; |C| is its size, roughly M/N
+  * t* — the rare token dominating the query (SKU, part number)
+  * n_{t*} — how many docs in the WHOLE corpus contain t*
+              (small — it's rare)
+  * n_{t*,C} — how many docs IN CLUSTER C contain t*
+                (even smaller, often 0 or 1)
+  * α_{t*} — the IDF weight of t*, log(M / n_{t*}) — big for rare
+  * ε — JL noise floor from the previous slide
+
+Say: "Everything from here is just these eight symbols."
+
+STEP 1 — CENTROID (right column)
+--------------------------------
+"The centroid of cluster C is the average of the document vectors in
+the cluster. c_C = (1/|C|) sum over d in C of f(d). Nothing tricky
+— definition of a centroid."
+
+STEP 2 — HOW MUCH DOES t* SHOW UP IN c_C?
+-----------------------------------------
+"Only the n_{t*,C} docs in C that actually contain t* contribute to
+the t*-direction of the centroid. Each contributes weight α_{t*}.
+Average them: the centroid's component along t* is (n_{t*,C} / |C|)
+times α_{t*}. We call that fraction n_{t*,C} / |C| the PREVALENCE p
+of t* inside cluster C."
+
+"For a rare token, p is TINY — often literally 1 / |C|, sometimes
+zero. Even in the RIGHT cluster the token barely shows up in the
+centroid, because averaging drowns it out."
+
+STEP 3 — INNER PRODUCT WITH THE QUERY (the boxed equation)
+----------------------------------------------------------
+"The query is dominated by t* — its vector has weight α_{t*} in that
+direction. So the inner product with the centroid is:
+    <c_C, q> ≈ α_{t*}^2 · p
+That's the bound. IDF squared times prevalence."
+
+Emphasize: "One factor is BIG (α squared, from rare = high IDF), one
+factor is SMALL (p, because averaging). Their product can go either
+way — and for spear-fishing queries it goes SMALL."
+
+SURVIVAL CONDITION (bottom block, the payoff)
+---------------------------------------------
+"The relevant centroid stays recognizable only if the signal clears
+the noise floor:
+    α_{t*}^2 · p >> ε
+For common tokens: p is large, condition satisfied trivially.
+For rare tokens: p is tiny, product falls BELOW ε, signal drowned in
+projection noise, wrong cluster picked, relevant docs invisible.
+
+Bigger embedding dimension d shrinks ε (JL). NOTHING you do with d
+shrinks the fact that p is small. So making embeddings bigger can
+partially help but it can never structurally fix this."
+
+MONEY LINE TO END ON
+--------------------
+"So — recap. The theory tool is JL, giving us ε. The mechanism is
+averaging, giving us small p on rare tokens. The bound says the
+signal drops below the noise. Every rare or ID query is a race
+between IDF trying to pull the signal up and prevalence trying to
+crush it down. IDF wins on common tokens; prevalence wins on rare
+tokens."
+
+
+========================================================================
+SLIDE 8 — HNSW ISN'T A WAY OUT
+========================================================================
+
+WHY THIS SLIDE EXISTS
+---------------------
+The IVF-specific bound is exact but IVF-specific. Empirically, HNSW
+fails on the same population. Audience will assume graph-based search
+is immune. Head it off.
+
+WHAT HNSW IS (one sentence)
+---------------------------
+"HNSW is a layered proximity graph. Start at a hub node at the top
+layer and do a greedy descent, at each step moving to the neighbor
+closest to the query, until you reach the query's local neighborhood."
+
+WHY IT STILL FAILS ON THE SAME QUERIES
+--------------------------------------
+Walk the bullets:
+  * "Graph edges built from Euclidean distances during insertion.
+    Dense regions of the embedding space get thick, well-connected
+    subgraphs."
+  * "Rare-token vectors sit in SPARSE regions of the space — few
+    neighbors, few incoming edges from hubs."
+  * "Greedy descent from a hub can't reach an orphan node without a
+    long detour. Stops in a locally-good but globally-wrong region."
+  * "You can widen the beam (efSearch) but with diminishing returns."
+
+MONEY LINE
+----------
+"Different mechanism from IVF centroid dilution. SAME VICTIMS. The
+common cause is that rare-token vectors are structurally hard to
+REACH, whether the structure is a partition or a graph."
+
+
+========================================================================
+SLIDE 9 — EXPERIMENTAL SETUP
+========================================================================
+
+DATASETS
+--------
+"Two corpora:
+  * Home Depot — 55k product titles. Real e-commerce catalog, IDs
+    are real SKUs, spear-fishing story is native to it.
+  * MS MARCO Passage — 82k passages. Standard IR benchmark for
+    calibration."
+Three query subsets of 1000 queries each: standard, rare, ID.
+
+REPRESENTATION
+--------------
+"Char-trigram vectors through a JL projection to d in {256, 512,
+1024}. Unsupervised — no training on the queries."
+
+INDICES
+-------
+"FAISS: exact Flat (the oracle), IVF (n_list and n_probe swept),
+HNSW (standard recipe M=16, efC=200, efSearch swept). BM25 in
+Pyserini as the sparse reference."
+
+"WHY UNSUPERVISED" (address before it's asked)
+----------------------------------------------
+"You may wonder why unsupervised trigrams and not DPR or
+Sentence-BERT. Because we need to isolate the INDEX bottleneck from
+the REPRESENTATION bottleneck. A supervised encoder abstracts away
+the lexical detail that defines spear-fishing queries. With DPR the
+Flat baseline would already collapse on IDs and we couldn't tell
+representation failure from indexing failure. JL trigrams provably
+preserve lexical distances, so Flat gets high recall on IDs — any
+gap on IVF or HNSW is unambiguously an INDEX problem. Slide 13
+returns to this with data."
+
+
+========================================================================
+SLIDE 10 — HEADLINE RESULT: THE FLAT -> HNSW GAP
+========================================================================
+
+WALK THE TABLE
+--------------
+Just three rows matter:
+  * Home Depot standard: Flat 0.327, HNSW 0.321. Basically identical.
+  * Home Depot ID: Flat 0.874, HNSW 0.327. HALF the recall or worse.
+  * MS MARCO ID: Flat 0.174, HNSW 0.071. Same qualitative story.
+
+Say: "Standard row — HNSW recovers Flat exactly, as advertised. ID
+row — HNSW throws away more than sixty percent of Flat's recall.
+Same embedding. Same corpus. Different index."
+
+THE THREE GAPS
+--------------
+Standard 1.8%, rare 17.5%, ID 62.6%.
+"The gap tracks the query population exactly as the theory predicts.
+Standard tokens: high prevalence p, dilution not a problem, recall
+preserved. Rare: moderate p, moderate loss. ID: p essentially zero
+per cluster, recall craters."
+
+MS MARCO CAVEAT (only if asked)
+-------------------------------
+"On MS MARCO the absolute Flat recall on IDs is lower because of
+representation limits of unsupervised trigrams. Our CLAIM is the
+Flat->ANN GAP — well-defined at any absolute level, present on
+both corpora."
+
+
+========================================================================
+SLIDE 11 — DIRECT EVIDENCE: MEASURE THE CENTROID SIGNAL
+========================================================================
+
+FRAMING
+-------
+"So far, theory says the centroid signal should collapse for
+rare-token queries. This slide is where we stop arguing from theory
+and start measuring the exact quantity the bound predicts."
+
+WHAT WE DID (per query)
+-----------------------
+* Trained IVF on Home Depot: n_list = 500 clusters, d = 1024.
+* For every query, look up which cluster actually contains its
+  relevant docs — call it c_rel. Deterministic once IVF is trained.
+* Compute three numbers: (a) raw signal <q, c_rel>; (b) rank of
+  c_rel among all 500 centroids scored against q; (c) whether c_rel
+  makes the top 250 ("hit@250").
+
+READING THE HISTOGRAM (left)
+----------------------------
+* Standard (blue): signal ~0.28, clearly separated from zero.
+* Rare (orange): collapsed toward zero, ~0.07.
+* ID (red): pile up at ~0.007. 40x smaller than standard.
+Say "forty times collapse" out loud.
+
+READING THE TABLE (right)
+-------------------------
+* Standard: correct centroid at rank 2. n_probe=5 finds it every
+  time. hit@250 = 97%.
+* Rare: rank 69 — need n_probe 70+ to be reliable, throwing away
+  IVF's speedup.
+* ID: rank 216 out of 500. WORSE THAN THE MEDIAN centroid.
+  hit@250 = 59% means 41% of ID queries have their relevant cluster
+  in the BOTTOM HALF. Structurally unrecoverable short of scanning
+  every cluster — which defeats IVF's purpose.
+
+TIE BACK TO THE BOUND
+---------------------
+"The bound predicted <c,q> ~ α^2 · p. Rare tokens: huge α, tiny p.
+Product drops below the JL floor ε. The measured 40x collapse from
+standard to ID is exactly that. Not analogy — the exact quantity
+from the bound, measured per query."
+
+TIMING
+------
+Spend a full minute on "rank 216" and "41% structurally
+unrecoverable." Empirical hinge of the paper — don't rush.
+
+
+========================================================================
+SLIDE 12 — THE PRODUCTION-VISIBLE SYMPTOM
+========================================================================
+
+FRAMING
+-------
+"Mechanism confirmed. Now: what does the USER actually see?"
+
+LEFT — EMPTY RESULT RATE (D_0)
+------------------------------
+D_0 = fraction of queries whose top-10 contains ZERO relevant docs.
+User-facing: an empty search page.
+
+Numbers:
+* HD-ID: Flat 13% -> HNSW 71%. Seven of ten ID queries empty.
+* MM-ID: Flat 78% -> HNSW 92%.
+* Standard: within ±2 pp on BOTH datasets — mainstream users see
+  essentially nothing.
+
+Landing: "The failure is concentrated on spear-fishing traffic and
+INVISIBLE in aggregate metrics. If you're watching mean recall, this
+failure is hidden. If you're the user searching for a specific SKU,
+it's 100% visible."
+
+RIGHT — COST-TO-CLOSE
+---------------------
+"Instead of 'at default efSearch, what recall?' ask 'how much
+efSearch to MATCH Flat's recall?'
+  * Standard: efSearch=100 hits 95% of Flat recall at 0.39 ms/q —
+    2.7x FASTER than Flat. Canonical HNSW value proposition, working.
+  * ID: efSearch=8000 needed, 41.9 ms/q — 40x SLOWER than Flat.
+  * MS MARCO ID: ~80x."
+
+Landing: "HNSW's whole value proposition is 'approximately Flat
+recall, way faster.' On IDs it INVERTS: same recall, way slower.
+You are paying more for the same accuracy on exactly the queries you
+needed acceleration for."
+
+CORPUS GENERALITY
+-----------------
+efSearch cost scales roughly linearly in corpus size — ratio ports to
+any N. Not a quirk of 54k or 82k documents.
+
+CLOSING LINE
+------------
+"Deploy pure dense with the standard HNSW recipe and tune efSearch
+for good aggregate recall at low latency — you're IMPLICITLY DECIDING
+to let 60-90% of your identifier traffic return empty. Invisible in
+your metrics, highly visible to the user. That's why hybrid isn't
+belt-and-suspenders — the sparse side is doing load-bearing work on
+a population dense simply cannot serve at practical latency."
+
+TIMING
+------
+Two numbers to leave the room with: "71%" and "40x." Slowly.
+
+
+========================================================================
+SLIDE 13 — "BUT LEARNED ENCODERS WOULD FIX THIS"
+========================================================================
+
+WHY THIS SLIDE EXISTS
+---------------------
+Every reviewer says: "you used trigrams — Sentence-BERT would be
+different." Head it off with data.
+
+WHAT WE DID
+-----------
+Re-ran the full grid with all-MiniLM-L6-v2 — supervised, 384-dim,
+Sentence-BERT.
+
+WALK THE TABLE
+--------------
+* MS MARCO standard: MiniLM 0.894 vs trigram 0.471 — MiniLM roughly
+  doubles standard recall, as designed. This is why people use
+  learned encoders.
+* HD-ID: trigram Flat 0.874, MiniLM Flat 0.010.
+* MM-ID: trigram Flat 0.174, MiniLM Flat 0.001.
+
+"MiniLM literally cannot distinguish identifiers. To Sentence-BERT,
+'12345' and '67890' are essentially the same vector."
+
+THE POINT
+---------
+"On IDs the representation collapses BEFORE the index gets a chance
+to bias things. Flat is already broken. Can't even measure a Flat ->
+HNSW gap here — there's no signal to measure a gap of.
+
+Which is exactly why we used JL trigrams for the main study. And
+exactly why hybrid retrieval exists in production."
+
+
+========================================================================
+SLIDE 14 — TAKEAWAYS
+========================================================================
+
+Walk each point briefly. Do not just read them.
+
+  1. "Production dense retrieval is hybrid for a reason. To drop the
+     sparse side you have TWO bottlenecks, not one."
+  2. "Bottleneck 1 (representation) is well-studied. Bottleneck 2
+     (indexing) is what this paper isolates and quantifies."
+  3. "Centroid dilution plus JL noise floor give a closed-form bound.
+     The 40x centroid-signal collapse from standard to ID matches
+     the bound. Theory and measurement agree."
+  4. "HNSW is not a workaround. Different mechanism, same victims."
+  5. "Practical implication: query-type-aware routing, index-aware
+     training, or — most simply — keep the sparse side."
+
+CLOSING LINE
+------------
+"The message is not 'dense retrieval is broken.' It's 'dense
+retrieval plus ANN has a second failure mode you can't see in
+aggregate metrics, and it hits exactly the queries production cares
+about most.'"
+
+CODE POINTER
+------------
+"All code and experiments are on GitHub at
+github.com/alemagnani/sparse-dense-paper. Repro is one script."
+
+
+========================================================================
+SLIDE 15 — THANK YOU
+========================================================================
+
+"Happy to take questions."
+
+Anticipated Q&A — quick reference:
+
+Q: "Would ScaNN / SPANN / other partition-based indices behave the
+same?"
+A: Same mechanism. Anything that scores via a summary representation
+of a partition suffers centroid dilution. The bound is about
+averaging, not IVF-specific.
+
+Q: "What about product quantization?"
+A: Additional quantization noise on top of the JL floor. Makes it
+worse, not better.
+
+Q: "Does query expansion help?"
+A: Only if expansion re-introduces high-prevalence tokens that align
+with the right centroid. In practice, expansion tends to water down
+the rare-token signal further. We didn't test it.
+
+Q: "Would contrastive training with hard negatives fix it?"
+A: For representation, sometimes. For the INDEX bottleneck we
+describe, no — the failure is at the averaging step, downstream of
+the embedding. The MiniLM data shows even a well-trained encoder
+collapses on IDs.
+
+Q: "Smallest thing a practitioner can do tomorrow?"
+A: Route spear-fishing queries (single-token, high-IDF, SKU-shaped)
+to BM25 or a Flat sidecar. That's ~1% of traffic and captures the
+failure population.
+
+Q: "How does this interact with reranking?"
+A: Reranking only sees candidates the index surfaced. If the correct
+cluster wasn't probed, the doc is not in the candidate list, rerank
+cannot recover it. Upstream of rerank.
+
+Q: "What if I just make d = 2048 or 4096?"
+A: Shrinks ε (JL floor), so the survival condition α^2 · p >> ε
+becomes easier to satisfy. Helps at the margin. But you cannot make
+p large — it is a property of the corpus + clustering, not of the
+embedding. And doubling d roughly doubles storage and query cost.
+
+
+========================================================================
+QUICK-REFERENCE CHEAT SHEET (skim right before you go on)
+========================================================================
+
+Big-picture arc (memorize this):
+  hybrid is universal -> can we go pure dense? -> two bottlenecks:
+  representation (known) + indexing (this paper) -> IVF primer ->
+  intuition (averaging) -> JL gives us ε -> the bound (α^2·p vs ε)
+  -> HNSW same victims different mechanism -> measured collapse
+  matches bound -> production symptom 60-90% empty on IDs invisible
+  in aggregate -> MiniLM doesn't rescue you -> hybrid exists for
+  a reason.
+
+The bound in one line:
+  <c_C, q> ≈ α_{t*}^2 · p          survives iff  >> ε
+
+Notation you MUST have memorized for slide 7:
+  M = corpus size
+  N = # clusters
+  |C| ≈ M/N
+  t* = rare token in query
+  n_{t*} = docs containing t* in corpus
+  n_{t*,C} = docs containing t* in cluster C
+  p = n_{t*,C} / |C|                (in-cluster prevalence)
+  α_{t*} = log(M / n_{t*})          (IDF)
+  ε ≈ sqrt(log V / d)               (JL noise floor)
+
+Numbers to have on the tip of your tongue:
+  * Flat->IVF ID recall loss: ~33%
+  * Flat->HNSW ID recall loss: ~63%
+  * Flat->HNSW standard recall loss: <2%
+  * Centroid signal collapse standard->ID: 40x
+  * ID relevant centroid rank: 216 / 500
+  * ID structurally unrecoverable fraction: 41%
+  * HD-ID empty result rate: 13% Flat -> 71% HNSW
+  * MM-ID empty result rate: 78% Flat -> 92% HNSW
+  * Cost to match Flat on ID (HD): 40x slower
+  * Cost to match Flat on ID (MM): ~80x slower
+  * MiniLM Flat R@10 on HD-ID: 0.010 (vs 0.874 trigram)
+
+Landing sentences to have ready:
+  * "The failure is not the embedding. It is the averaging step
+    in the index."
+  * "Same embedding. Different index. Different victims."
+  * "Invisible in aggregate metrics. 100% visible to the user."
+  * "Bigger d helps ε. Nothing helps p."
+  * "Hybrid isn't belt-and-suspenders. The sparse side is
+    load-bearing."
