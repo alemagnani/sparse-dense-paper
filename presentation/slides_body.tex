@@ -232,27 +232,33 @@
 \end{frame}
 
 %% =====================================================================
-\begin{frame}{HNSW isn't a way out}
-  \textbf{HNSW} is not partition-based --- it is a \emph{layered proximity graph}.
-  Greedy descent from a hub node down to the query's local neighborhood.
+\begin{frame}{HNSW: same failure, hop by hop}
+  HNSW replaces ``pick a cluster'' with ``walk a graph'': at each step,
+  score the query against a candidate's neighbors and move to the closest.
 
   \medskip
-  \textbf{So why does it fail on the same queries?}
-  \begin{itemize}
-    \item Graph edges are built from Euclidean distances during insertion.
-    \item Dense regions of the embedding space get thick, well-connected
-          subgraphs. Rare vectors land in sparse regions --- \emph{few incoming
-          edges from any hub}.
-    \item Greedy search from a hub cannot reach an orphan node without a long
-          detour: it stops at a locally-good but globally-wrong region.
-    \item Widening the beam (\texttt{efSearch}) helps --- but with diminishing
-          returns.
-  \end{itemize}
+  \textbf{The problem}: each hop is a \emph{decision} that must be driven by
+  the rare-token signal. But the candidate's neighbors are just \emph{other
+  documents} --- and \alert{almost none of them carry $t^*$}. Every hop faces
+  the same signal-vs-noise problem as picking a centroid:
+  \[
+    \langle q,\, f(d_{\text{neighbor}})\rangle \;\approx\; 0
+    \quad\text{for the vast majority of neighbors.}
+  \]
+  The greedy step can't tell which direction $t^*$ lives in, so it drifts
+  toward whatever common-token structure is nearby --- not toward
+  $d_{\text{rel}}$.
 
   \medskip
-  \textbf{The pattern is the same}: rare-token vectors are structurally hard
-  to \emph{reach}, whether the structure is a partition (IVF) or a graph (HNSW).
-  Different mechanism; \alert{same victims}.
+  Widening the beam (\texttt{efSearch}) keeps more candidates alive per hop,
+  so the walk is less likely to lose the trail --- but with diminishing
+  returns, because each extra candidate has the same low chance of carrying
+  $t^*$.
+
+  \medskip
+  \textbf{Same root cause}: rare tokens don't survive the \emph{averaging} in
+  IVF centroids, and don't survive the \emph{greedy comparison} against
+  arbitrary neighbors in HNSW. Different index, \alert{same victims}.
 \end{frame}
 
 %% =====================================================================
